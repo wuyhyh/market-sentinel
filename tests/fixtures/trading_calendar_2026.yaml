@@ -1,0 +1,202 @@
+year: 2026
+markets:
+  a_share:
+    timezone: Asia/Shanghai
+    known_trading_days:
+      - date: 2026-02-13
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-24
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-07-24
+        source_name: 上海证券交易所交易规则（2026年修订）
+        source_url: https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml
+    weekends:
+      - date: 2026-02-28
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-07-25
+        source_name: 上海证券交易所交易规则（2026年修订）
+        source_url: https://www.sse.com.cn/lawandrules/sselawsrules2025/trade/universal/c/c_20260424_10816492.shtml
+    official_holidays:
+      - date: 2026-01-01
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-01-02
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-16
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-17
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-18
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-19
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-20
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-02-23
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-04-06
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-05-01
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-05-04
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-05-05
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-06-19
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-09-25
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-10-01
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-10-02
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-10-05
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-10-06
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+      - date: 2026-10-07
+        source_name: 上海证券交易所2026年休市安排
+        source_url: https://www.sse.com.cn/disclosure/announcement/general/c/c_20251222_10802507.shtml
+
+  korea:
+    timezone: Asia/Seoul
+    known_trading_days:
+      - date: 2026-06-02
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-06-04
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-07-24
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-12-30
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+    weekends:
+      - date: 2026-07-25
+        source_name: Korea Exchange Holiday Rules
+        source_url: https://global.krx.co.kr/contents/GLB/06/0602/0602010201/GLB0602010201T1.jsp
+    official_holidays:
+      - date: 2026-01-01
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-02-16
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-02-17
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-02-18
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-03-02
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-05-01
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-05-05
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-05-25
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-06-03
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-08-17
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-09-24
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-09-25
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-10-05
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-10-09
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-12-25
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+      - date: 2026-12-31
+        source_name: Korea Exchange 2026 KOSDAQ Disclosure Calendar
+        source_url: https://kind.krx.co.kr/external/dst/reference/11625/2026%20%EC%BD%94%EC%8A%A4%EB%8B%A5%EC%8B%9C%EC%9E%A5%20%EA%B3%B5%EC%8B%9C%EC%9D%BC%EC%A0%95%20%EC%BA%98%EB%A6%B0%EB%8D%94_vF.pdf
+
+  us:
+    timezone: America/New_York
+    known_trading_days:
+      - date: 2026-04-02
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-04-06
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-07-24
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-11-27
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-12-24
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+    weekends:
+      - date: 2026-07-25
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+    official_holidays:
+      - date: 2026-01-01
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-01-19
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-02-16
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-04-03
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-05-25
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-06-19
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-07-03
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-09-07
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-11-26
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
+      - date: 2026-12-25
+        source_name: NYSE Holidays & Trading Hours 2026
+        source_url: https://www.nyse.com/markets/hours-calendars
