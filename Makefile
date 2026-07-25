@@ -1,4 +1,4 @@
-.PHONY: install test lint run docker-up docker-down
+.PHONY: install test lint verify run docker-up docker-down
 
 install:
 	python -m pip install -e ".[dev]"
@@ -8,6 +8,12 @@ test:
 
 lint:
 	ruff check src tests
+
+verify:
+	pytest -q
+	ruff check src tests
+	mypy src tests
+	python -m compileall -q src tests
 
 run:
 	uvicorn market_sentinel.app:app --reload
