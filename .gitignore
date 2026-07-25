@@ -8,3 +8,6 @@ __pycache__/
 data/
 dist/
 build/
+
+# JetBrains IDE
+.idea/
