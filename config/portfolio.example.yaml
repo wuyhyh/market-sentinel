@@ -1,0 +1,23 @@
+total_capital: 500000
+minimum_cash: 150000
+max_total_stock_value: 100000
+max_single_stock_value: 35000
+hard_stop_loss_pct: 0.05
+
+target_buckets:
+  etf_core: 150000
+  etf_tactical: 100000
+  individual_stocks: 100000
+  cash: 150000
+
+positions:
+  - symbol: "588200.SH"
+    name: "科创芯片ETF示例"
+    asset_type: "etf_core"
+    market_value: 150000
+    cost_value: 150000
+  - symbol: "CASH.CNY"
+    name: "现金"
+    asset_type: "cash"
+    market_value: 350000
+    cost_value: 350000

@@ -1,0 +1,31 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config:/app/config:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: market_sentinel
+      POSTGRES_USER: market_sentinel
+      POSTGRES_PASSWORD: change-me
+    volumes:
+      - market_sentinel_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U market_sentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  market_sentinel_pg:
