@@ -2,9 +2,11 @@
 
 ## 1. 当前阶段
 
-**阶段 0：Mock MVP 稳定化**
+**阶段 1：真实交易日历基线**
 
-本阶段的目的是验证系统架构、任务编排、确定性风险检查和任务可观察性。当前结果证明开发环境中的 Mock 执行链可以按预期完成或跳过任务，但不代表系统已经具备真实行情采集、真实交易日识别或真实投研能力。
+阶段 0 的 Mock MVP 稳定化已经完成。阶段 1 已建立真实交易日历基线：production 使用经过固定官方日期交叉验证的交易所日历判断任务是否执行，development/test 仍可使用开发日历。
+
+这一基线只解决交易日识别，不代表系统已经具备实时行情采集、真实新闻与公告采集或真实投研能力。当前完整报告链中的行情、分析和默认通知仍以 Mock 或开发实现为主。
 
 ## 2. 已实现功能
 
@@ -14,6 +16,9 @@
 - `MarketPhase` 到 `TradingMarket` 的显式映射及逐项测试。
 - `TradingCalendar` 交易日检查抽象。
 - 仅用于 development/test 的 `WeekdayCalendar`。
+- 基于 `exchange-calendars==4.13.2` 的 `ExchangeCalendarsTradingCalendar`。
+- 三个生产市场日历映射：`TradingMarket.A_SHARE → XSHG`、`TradingMarket.KOREA → XKRX`、`TradingMarket.US → XNYS`。
+- 2026 年官方日期 fixture 交叉验证，覆盖三个市场的已知交易日、周末和官方休市日。
 - `MockMarketDataProvider` Mock 行情提供器。
 - 由确定性 Python 代码执行的组合风险引擎。
 - `MockAnalyst` Mock LLM 实现。
@@ -142,7 +147,11 @@ make verify
 
 - 默认 `LLM_PROVIDER` 是 `mock`，默认执行不会选择付费模型。
 - `development` 和 `test` 环境允许使用 `WeekdayCalendar`。
-- `production` 环境明确拒绝 `WeekdayCalendar`；当前尚无真实交易所日历适配器，因此生产日历配置不会降级到简单工作日判断。
+- `production` 环境明确拒绝 `WeekdayCalendar`，必须设置 `TRADING_CALENDAR=exchange`，由 `ExchangeCalendarsTradingCalendar` 判断交易日；初始化、未知市场或日期越界错误不会降级到简单工作日判断。
+- 真实日历依赖固定为 `exchange-calendars==4.13.2`。
+- 市场代码固定为中国 A 股 `XSHG`、韩国 `XKRX`、美国 `XNYS`。
+- 官方交叉验证数据位于 `tests/fixtures/trading_calendar_2026.yaml`，年份为 2026。
+- fixture 来源包括上海证券交易所 2026 年休市安排及交易规则、Korea Exchange 2026 KOSDAQ Disclosure Calendar 及 Holiday Rules、NYSE Holidays & Trading Hours 2026。来源 URL 只用于人工审计，测试不访问网络。
 - OpenAI Key 通过环境变量 `OPENAI_API_KEY` 提供；选择 OpenAI 但缺少 Key 时明确失败。
 - DeepSeek Key 通过环境变量 `DEEPSEEK_API_KEY` 提供；选择 DeepSeek 但缺少 Key 时明确失败。
 - API Key 在 Settings 中使用 `SecretStr`，常规字符串、repr 和 JSON 输出会脱敏。
@@ -152,11 +161,11 @@ make verify
 
 ## 7. 最近验证结果
 
-- 验证日期：2026-07-25（Asia/Shanghai）
+- 验证日期：2026-07-26（Asia/Shanghai）
 - 执行命令：`make verify`
-- pytest：48 passed
+- pytest：123 passed
 - Ruff：All checks passed
-- Mypy：Success，35 个源文件未发现问题
+- Mypy：Success，37 个源文件未发现问题
 - compileall：成功，无错误输出
 
 ## 8. 已知问题
@@ -172,10 +181,16 @@ make verify
 - 配置测试已覆盖 development/test/production 日历边界、默认 Mock、付费模型缺少密钥、无效 provider、SecretStr 脱敏和无效组合配置路径。
 - `make verify` 已统一项目的本地测试、Lint、类型检查和字节码编译检查。
 
+### 阶段 1 已解决
+
+- production 日历路径已接入 `exchange-calendars==4.13.2` 的真实适配器，并拒绝使用 `WeekdayCalendar`。
+- XSHG、XKRX 和 XNYS 映射已逐项验证。
+- 2026 年官方日期 fixture 已覆盖三个市场的交易日、周末和官方休市日，并作为依赖升级后的固定交叉验证基线。
+- 已验证日期范围固定为 2026 年，KRX 在 2026-06-03 的官方选举日休市由显式例外覆盖。
+
 ### 后续阶段处理
 
-- 真实交易所日历尚未实现。
-- 真实行情数据尚未接入。
+- 实时行情数据尚未接入，当前仍使用 `MockMarketDataProvider`。
 - 官方公告和新闻数据尚未接入。
 - 真实通知渠道尚未确定。
 - PostgreSQL 尚未用于业务数据持久化。
@@ -204,4 +219,6 @@ make verify
 
 ## 10. 下一阶段唯一目标
 
-**阶段 1：调研、设计并接入真实交易日历。**
+**阶段 2：调研、设计并接入有授权、可验证、带来源和数据时间的实时行情数据源。**
+
+本阶段只处理实时行情，不同时展开持仓导入、新闻、数据库或真实 LLM 日常运行。

@@ -23,6 +23,8 @@
 
 - FastAPI 健康检查接口；
 - APScheduler 定时任务；
+- 基于 `exchange-calendars==4.13.2` 的真实交易日历适配器；
+- 中国 A 股 `XSHG`、韩国 `XKRX`、美国 `XNYS` 三个市场日历；
 - OpenAI Responses API 结构化输出适配器；
 - DeepSeek OpenAI-compatible API 适配器；
 - 可替换行情数据接口；
@@ -32,8 +34,9 @@
 - 单元测试；
 - Codex 项目说明 `AGENTS.md`。
 
-> 当前行情数据源是 Mock，仅用于开发。接入真实资金前，必须更换为有授权、可验证、带时间戳的行情和公告数据源，并补齐交易所节假日日历。
-> `WeekdayCalendar` 仅供开发，并支持测试时注入节假日；生产环境会拒绝使用它。
+> 当前行情数据源仍是 Mock，仅用于开发，尚未接入实时行情。接入真实资金前，必须更换为有授权、可验证、带来源和数据时间的行情及公告数据源。
+> `WeekdayCalendar` 仅供 development/test 使用；production 必须显式配置 `TRADING_CALENDAR=exchange`，使用真实交易日历，且不会在日历错误时回退到简单的周一至周五判断。
+> 真实日历以交易所官方公告为事实来源；项目维护 `tests/fixtures/trading_calendar_2026.yaml`，固定交叉验证 2026 年三个市场的已知交易日、周末和官方休市日。
 
 ## 快速开始
 
@@ -120,6 +123,19 @@ curl -X POST http://127.0.0.1:8000/jobs/a_share_close
 
 正式版必须使用真实交易日历，不能只依赖“周一至周五”。
 
+当前 production 日历基线使用 `exchange-calendars==4.13.2`：
+
+- 中国 A 股：`XSHG`；
+- 韩国股票市场：`XKRX`；
+- 美国股票市场：`XNYS`。
+
+运行 production 配置时必须设置：
+
+```dotenv
+APP_ENV=production
+TRADING_CALENDAR=exchange
+```
+
 ## 目录
 
 ```text
@@ -131,6 +147,7 @@ src/market_sentinel/
 ├── scheduler.py           # 跨时区任务
 ├── risk_engine.py         # 确定性风险规则
 ├── domain/models.py       # 结构化数据模型
+├── trading_calendar/      # 开发日历与真实交易所日历
 ├── llm/                   # OpenAI / DeepSeek 适配器
 ├── market_data/           # 行情数据接口
 └── notifications/         # 通知接口
@@ -138,13 +155,9 @@ src/market_sentinel/
 
 ## 下一阶段
 
-1. 接入真实交易日历与授权行情；
-2. 接入持仓导入；
-3. 接入官方公告；
-4. 保存原始数据和摘要到 PostgreSQL；
-5. 加入数据新鲜度、缺失值和重复消息检查；
-6. 运行 20–40 个交易日的影子模式；
-7. 再决定是否用小资金验证策略。
+**阶段 2：调研、设计并接入有授权、可验证、带来源和数据时间的实时行情数据源。**
+
+真实持仓导入、官方公告、数据库、真实模型日常运行和影子模式不与该目标同时展开。
 
 ## 重要声明
 
