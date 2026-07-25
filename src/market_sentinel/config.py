@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     llm_provider: Literal["openai", "deepseek", "mock"] = "mock"
-    trading_calendar: Literal["weekday"] = "weekday"
+    trading_calendar: Literal["weekday", "exchange"] = "weekday"
 
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6"

@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "apscheduler>=3.10,<4",
+  "exchange-calendars==4.13.2",
   "fastapi>=0.115",
   "httpx>=0.27",
   "openai>=1.68",
@@ -49,5 +50,5 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["apscheduler.*"]
+module = ["apscheduler.*", "exchange_calendars", "exchange_calendars.*"]
 ignore_missing_imports = true

@@ -10,6 +10,7 @@ from market_sentinel.llm.deepseek_provider import DeepSeekAnalyst
 from market_sentinel.llm.factory import build_analyst
 from market_sentinel.llm.mock_provider import MockAnalyst
 from market_sentinel.llm.openai_provider import OpenAIAnalyst
+from market_sentinel.trading_calendar.exchange import ExchangeCalendarsTradingCalendar
 from market_sentinel.trading_calendar.factory import build_trading_calendar
 from market_sentinel.trading_calendar.weekday import WeekdayCalendar
 
@@ -76,6 +77,22 @@ def test_weekday_calendar_is_rejected_in_production() -> None:
                 trading_calendar="weekday",
             ),
         )
+
+
+def test_exchange_calendar_is_used_in_production() -> None:
+    calendar = build_trading_calendar(
+        make_settings(
+            app_env="production",
+            trading_calendar="exchange",
+        ),
+    )
+
+    assert isinstance(calendar, ExchangeCalendarsTradingCalendar)
+
+
+def test_unknown_trading_calendar_is_rejected_by_configuration() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(trading_calendar="unsupported")
 
 
 def test_default_settings_use_mock_analyst() -> None:
