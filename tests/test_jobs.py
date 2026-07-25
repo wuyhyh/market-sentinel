@@ -141,5 +141,26 @@ async def test_trading_day_runs_report_pipeline() -> None:
     assert notifier.calls == 1
 
 
+@pytest.mark.parametrize(
+    ("phase", "expected_market"),
+    [
+        (MarketPhase.OVERNIGHT, TradingMarket.A_SHARE),
+        (MarketPhase.A_SHARE_CALL_AUCTION, TradingMarket.A_SHARE),
+        (MarketPhase.A_SHARE_OPEN_PRICE, TradingMarket.A_SHARE),
+        (MarketPhase.A_SHARE_MIDDAY, TradingMarket.A_SHARE),
+        (MarketPhase.A_SHARE_CLOSE, TradingMarket.A_SHARE),
+        (MarketPhase.KOREA_OPEN, TradingMarket.KOREA),
+        (MarketPhase.KOREA_CLOSE, TradingMarket.KOREA),
+        (MarketPhase.US_OPEN, TradingMarket.US),
+        (MarketPhase.US_CLOSE, TradingMarket.US),
+    ],
+)
+def test_every_market_phase_maps_to_expected_market(
+    phase: MarketPhase,
+    expected_market: TradingMarket,
+) -> None:
+    assert PHASE_MARKETS[phase] is expected_market
+
+
 def test_every_market_phase_has_a_calendar_mapping() -> None:
     assert set(PHASE_MARKETS) == set(MarketPhase)
