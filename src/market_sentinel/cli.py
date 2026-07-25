@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 
 from market_sentinel.bootstrap import build_report_service
 from market_sentinel.domain.models import MarketPhase
@@ -19,7 +20,9 @@ def main() -> None:
     args = parse_args()
     if args.command == "run-once":
         service = build_report_service()
-        asyncio.run(service.run(MarketPhase(args.phase)))
+        phase = MarketPhase(args.phase)
+        status = asyncio.run(service.run(phase))
+        print(json.dumps({"status": status.value, "phase": phase.value}))
 
 
 if __name__ == "__main__":
