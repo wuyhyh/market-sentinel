@@ -1,12 +1,37 @@
+import json
+import logging
+
+from apscheduler.events import EVENT_JOB_EXECUTED, JobExecutionEvent
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from market_sentinel.domain.models import MarketPhase
+from market_sentinel.domain.models import JobRunStatus, MarketPhase
 from market_sentinel.jobs import ReportService
+from market_sentinel.trading_calendar.base import PHASE_MARKETS
+
+logger = logging.getLogger(__name__)
+
+
+def _log_scheduled_report_result(event: JobExecutionEvent) -> None:
+    phase = MarketPhase(event.job_id)
+    market = PHASE_MARKETS[phase]
+    status = JobRunStatus(event.retval)
+    logger.info(
+        json.dumps(
+            {
+                "event": "scheduled_report_finished",
+                "status": status.value,
+                "phase": phase.value,
+                "market": market.value,
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def build_scheduler(service: ReportService) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_listener(_log_scheduled_report_result, EVENT_JOB_EXECUTED)
 
     # A 股时点（Asia/Shanghai）
     china_jobs = [
