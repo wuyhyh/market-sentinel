@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -12,7 +13,7 @@ scheduler = build_scheduler(service)
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     if get_settings().enable_scheduler and not scheduler.running:
         scheduler.start()
     yield
@@ -39,5 +40,5 @@ async def run_job(phase: str) -> dict[str, str]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Unknown phase: {phase}") from exc
 
-    await service.run(market_phase)
-    return {"status": "completed", "phase": market_phase.value}
+    status = await service.run(market_phase)
+    return {"status": status.value, "phase": market_phase.value}

@@ -33,6 +33,7 @@
 - Codex 项目说明 `AGENTS.md`。
 
 > 当前行情数据源是 Mock，仅用于开发。接入真实资金前，必须更换为有授权、可验证、带时间戳的行情和公告数据源，并补齐交易所节假日日历。
+> `WeekdayCalendar` 仅供开发，并支持测试时注入节假日；生产环境会拒绝使用它。
 
 ## 快速开始
 
@@ -55,6 +56,7 @@ market-sentinel run-once a_share_close
 
 ```dotenv
 LLM_PROVIDER=openai
+TRADING_CALENDAR=weekday
 OPENAI_API_KEY=...
 OPENAI_MODEL=gpt-5.6
 ```
@@ -69,6 +71,8 @@ DEEPSEEK_API_KEY=...
 DEEPSEEK_MODEL=deepseek-v4-flash
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 ```
+
+从项目目录之外启动时，需将 `PORTFOLIO_CONFIG_PATH` 设置为组合 YAML 的绝对路径。
 
 ### 4. 启动 24 小时服务
 

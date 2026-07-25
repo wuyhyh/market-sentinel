@@ -19,6 +19,17 @@ class MarketPhase(StrEnum):
     US_CLOSE = "us_close"
 
 
+class TradingMarket(StrEnum):
+    A_SHARE = "a_share"
+    KOREA = "korea"
+    US = "us"
+
+
+class JobRunStatus(StrEnum):
+    COMPLETED = "completed"
+    SKIPPED_NON_TRADING_DAY = "skipped_non_trading_day"
+
+
 class ActionState(StrEnum):
     NO_ACTION = "no_action"
     WATCH = "watch"

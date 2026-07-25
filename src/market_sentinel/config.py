@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import SecretStr
@@ -13,10 +14,11 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: str = "development"
+    app_env: Literal["development", "test", "production"] = "development"
     log_level: str = "INFO"
 
     llm_provider: Literal["openai", "deepseek", "mock"] = "mock"
+    trading_calendar: Literal["weekday"] = "weekday"
 
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6"
@@ -26,6 +28,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
 
     notify_webhook_url: str | None = None
+    portfolio_config_path: Path = Path("config/portfolio.example.yaml")
     enable_scheduler: bool = True
 
 

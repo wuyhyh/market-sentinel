@@ -1,6 +1,9 @@
 # 架构草案
 
 ```text
+Scheduler / Event Trigger ──► Job Guard ◄── Trading Calendar
+                                  │
+                                  ▼
 交易所/数据商/官方公告/新闻
               │
               ▼
@@ -40,6 +43,8 @@ Risk Engine      LLM Analyst Adapter
 系统进程 24 小时存活，但不是 24 小时持续调用模型。
 
 - 定时任务：固定市场节点；
+- 任务防线：读取行情前按市场本地时区检查交易日；开发使用 `WeekdayCalendar`，
+  生产必须接入真实交易所日历；
 - 事件任务：价格、成交量、公告或新闻超过阈值时；
 - 去重：相同消息只处理一次；
 - 冷却时间：防止异常行情造成通知风暴；
