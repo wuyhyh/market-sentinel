@@ -4,11 +4,11 @@ import json
 import os
 from collections import Counter
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from market_sentinel.bootstrap import build_report_service
-from market_sentinel.config import get_settings
+from market_sentinel.config import Settings, get_settings
 from market_sentinel.domain.models import MarketPhase
 from market_sentinel.domain.security_data import (
     DailyBarBatch,
@@ -28,6 +28,9 @@ from market_sentinel.market_data import (
     MarketDataQualityError,
     MarketDataRateLimitError,
     MarketDataTimeoutError,
+    SecurityMasterCache,
+    SecurityMasterCacheEntry,
+    SecurityMasterCacheError,
     build_tushare_reference_providers,
 )
 from market_sentinel.watchlist import WatchlistConfigurationError, WatchlistLoader
@@ -74,6 +77,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Fetch configured A-share security master records",
     )
     _add_reference_common_arguments(security_master)
+    security_master.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh the cache from Tushare instead of reading it only",
+    )
+    security_master.add_argument(
+        "--allow-stale",
+        action="store_true",
+        help="Allow an expired cache, including as an explicit refresh fallback",
+    )
 
     daily = reference_commands.add_parser(
         "daily",
@@ -214,8 +227,17 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
 
     if settings is None:
         raise RuntimeError("settings must be loaded for a real reference-data request")
+    if args.reference_command == "security-master":
+        return await _run_security_master_command(
+            args=args,
+            settings=settings,
+            symbols=symbols,
+            security_types=security_types,
+            etf_count=etf_count,
+        )
+
     try:
-        security_master_provider, daily_bar_provider = (
+        _, daily_bar_provider = (
             build_tushare_reference_providers(settings, security_types)
         )
     except MarketDataProviderError as error:
@@ -232,20 +254,13 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if args.reference_command == "security-master":
-        security_master_batch = (
-            await security_master_provider.get_security_master(symbols)
-        )
-        batch: SecurityMasterBatch | DailyBarBatch = security_master_batch
-        output_path = REFERENCE_OUTPUT_DIR / "security-master.json"
-        returned_count = len(security_master_batch.records)
-    elif args.reference_command == "daily":
+    if args.reference_command == "daily":
         daily_bar_batch = await daily_bar_provider.get_daily_bars(
             symbols,
             args.date,
             args.date,
         )
-        batch = daily_bar_batch
+        batch: SecurityMasterBatch | DailyBarBatch = daily_bar_batch
         output_path = REFERENCE_OUTPUT_DIR / f"daily-{args.date.isoformat()}.json"
         returned_count = len({bar.symbol for bar in daily_bar_batch.bars})
     else:
@@ -268,6 +283,258 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
         output_path=output_path,
     )
     return 2 if batch.completeness.value == "failed" else 0
+
+
+async def _run_security_master_command(
+    *,
+    args: argparse.Namespace,
+    settings: Settings,
+    symbols: tuple[str, ...],
+    security_types: dict[str, SecurityCategory],
+    etf_count: int,
+) -> int:
+    cache_path = REFERENCE_OUTPUT_DIR / "security-master.json"
+    cache = SecurityMasterCache(cache_path)
+    now = _utc_now()
+    max_age = timedelta(days=settings.security_master_max_age_days)
+
+    cached_entry: SecurityMasterCacheEntry | None = None
+    cache_error: SecurityMasterCacheError | None = None
+    try:
+        cached_entry = cache.load(
+            expected_symbols=symbols,
+            now=now,
+            max_age=max_age,
+        )
+    except SecurityMasterCacheError as error:
+        cache_error = error
+
+    if not args.refresh:
+        if cached_entry is None:
+            _print_security_master_cache_summary(
+                status=(
+                    "cache_miss"
+                    if cache_error is not None and cache_error.code == "cache_miss"
+                    else "failed"
+                ),
+                cache_status=cache_error.code if cache_error else "invalid_cache",
+                cache_path=cache_path,
+                fetched_at=None,
+                age_seconds=None,
+                requested_count=len(symbols),
+                returned_count=0,
+                missing_count=0,
+                unsupported_count=etf_count,
+                provider_error_counts={},
+                network_calls=0,
+            )
+            return 2
+        if cached_entry.is_stale and not args.allow_stale:
+            _print_security_master_cache_summary(
+                status="cache_stale",
+                cache_status="stale",
+                cache_path=cache_path,
+                fetched_at=cached_entry.document.fetched_at,
+                age_seconds=cached_entry.age_seconds,
+                requested_count=len(cached_entry.batch.requested_symbols),
+                returned_count=len(cached_entry.batch.records),
+                missing_count=len(cached_entry.batch.missing_symbols),
+                unsupported_count=len(cached_entry.batch.unsupported_symbols),
+                provider_error_counts=_provider_error_counts(cached_entry.batch),
+                network_calls=0,
+            )
+            return 2
+        _print_security_master_cache_summary(
+            status=(
+                "stale"
+                if cached_entry.is_stale
+                else cached_entry.batch.completeness.value
+            ),
+            cache_status="stale" if cached_entry.is_stale else "fresh",
+            cache_path=cache_path,
+            fetched_at=cached_entry.document.fetched_at,
+            age_seconds=cached_entry.age_seconds,
+            requested_count=len(cached_entry.batch.requested_symbols),
+            returned_count=len(cached_entry.batch.records),
+            missing_count=len(cached_entry.batch.missing_symbols),
+            unsupported_count=len(cached_entry.batch.unsupported_symbols),
+            provider_error_counts=_provider_error_counts(cached_entry.batch),
+            network_calls=0,
+        )
+        return 0
+
+    planned_network_calls = sum(
+        (
+            any(
+                security_type is SecurityCategory.STOCK
+                for security_type in security_types.values()
+            ),
+            any(
+                security_type is SecurityCategory.INDEX
+                for security_type in security_types.values()
+            ),
+        )
+    )
+    try:
+        security_master_provider, _ = build_tushare_reference_providers(
+            settings, security_types
+        )
+    except MarketDataProviderError as error:
+        return _handle_security_master_refresh_failure(
+            args=args,
+            cache_path=cache_path,
+            cached_entry=cached_entry,
+            requested_count=len(symbols),
+            unsupported_count=etf_count,
+            provider_error_counts={_provider_exception_category(error): 1},
+            network_calls=0,
+        )
+
+    try:
+        batch = await security_master_provider.get_security_master(symbols)
+    except MarketDataProviderError as error:
+        return _handle_security_master_refresh_failure(
+            args=args,
+            cache_path=cache_path,
+            cached_entry=cached_entry,
+            requested_count=len(symbols),
+            unsupported_count=etf_count,
+            provider_error_counts={_provider_exception_category(error): 1},
+            network_calls=planned_network_calls,
+        )
+
+    provider_error_counts = _provider_error_counts(batch)
+    if batch.completeness.value == "failed":
+        return _handle_security_master_refresh_failure(
+            args=args,
+            cache_path=cache_path,
+            cached_entry=cached_entry,
+            requested_count=len(symbols),
+            unsupported_count=len(batch.unsupported_symbols),
+            provider_error_counts=provider_error_counts,
+            network_calls=planned_network_calls,
+        )
+
+    refreshed_at = _utc_now()
+    try:
+        document = cache.write_atomic(batch, fetched_at=refreshed_at)
+    except SecurityMasterCacheError:
+        _print_security_master_cache_summary(
+            status="failed",
+            cache_status="cache_write_failed",
+            cache_path=cache_path,
+            fetched_at=None,
+            age_seconds=None,
+            requested_count=len(batch.requested_symbols),
+            returned_count=len(batch.records),
+            missing_count=len(batch.missing_symbols),
+            unsupported_count=len(batch.unsupported_symbols),
+            provider_error_counts={"cache_write_failed": 1},
+            network_calls=planned_network_calls,
+        )
+        return 2
+
+    _print_security_master_cache_summary(
+        status=batch.completeness.value,
+        cache_status="refreshed",
+        cache_path=cache_path,
+        fetched_at=document.fetched_at,
+        age_seconds=0,
+        requested_count=len(batch.requested_symbols),
+        returned_count=len(batch.records),
+        missing_count=len(batch.missing_symbols),
+        unsupported_count=len(batch.unsupported_symbols),
+        provider_error_counts=provider_error_counts,
+        network_calls=planned_network_calls,
+    )
+    return 0
+
+
+def _handle_security_master_refresh_failure(
+    *,
+    args: argparse.Namespace,
+    cache_path: Path,
+    cached_entry: SecurityMasterCacheEntry | None,
+    requested_count: int,
+    unsupported_count: int,
+    provider_error_counts: dict[str, int],
+    network_calls: int,
+) -> int:
+    if args.allow_stale and cached_entry is not None:
+        _print_security_master_cache_summary(
+            status="stale",
+            cache_status="refresh_failed_using_stale",
+            cache_path=cache_path,
+            fetched_at=cached_entry.document.fetched_at,
+            age_seconds=cached_entry.age_seconds,
+            requested_count=len(cached_entry.batch.requested_symbols),
+            returned_count=len(cached_entry.batch.records),
+            missing_count=len(cached_entry.batch.missing_symbols),
+            unsupported_count=len(cached_entry.batch.unsupported_symbols),
+            provider_error_counts=provider_error_counts,
+            network_calls=network_calls,
+        )
+        return 0
+
+    _print_security_master_cache_summary(
+        status="failed",
+        cache_status="refresh_failed",
+        cache_path=cache_path,
+        fetched_at=None,
+        age_seconds=None,
+        requested_count=requested_count,
+        returned_count=0,
+        missing_count=0,
+        unsupported_count=unsupported_count,
+        provider_error_counts=provider_error_counts,
+        network_calls=network_calls,
+    )
+    return 2
+
+
+def _provider_error_counts(batch: SecurityMasterBatch) -> dict[str, int]:
+    return dict(
+        sorted(Counter(error.category.value for error in batch.provider_errors).items())
+    )
+
+
+def _print_security_master_cache_summary(
+    *,
+    status: str,
+    cache_status: str,
+    cache_path: Path,
+    fetched_at: datetime | None,
+    age_seconds: int | None,
+    requested_count: int,
+    returned_count: int,
+    missing_count: int,
+    unsupported_count: int,
+    provider_error_counts: dict[str, int],
+    network_calls: int,
+) -> None:
+    print(
+        json.dumps(
+            {
+                "status": status,
+                "cache_status": cache_status,
+                "cache_path": cache_path.as_posix(),
+                "fetched_at": fetched_at.isoformat() if fetched_at else None,
+                "age_seconds": age_seconds,
+                "requested_count": requested_count,
+                "returned_count": returned_count,
+                "missing_count": missing_count,
+                "unsupported_count": unsupported_count,
+                "provider_error_counts": dict(sorted(provider_error_counts.items())),
+                "network_calls": network_calls,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 def _reference_security_type(security_type: SecurityType) -> SecurityCategory:

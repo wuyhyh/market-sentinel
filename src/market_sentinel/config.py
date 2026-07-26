@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
 
     tushare_token: SecretStr | None = None
+    security_master_max_age_days: int = Field(default=7, gt=0)
 
     notify_webhook_url: str | None = None
     portfolio_config_path: Path = Path("config/portfolio.example.yaml")
