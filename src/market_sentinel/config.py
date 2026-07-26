@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_base_url: str = "https://api.deepseek.com"
 
+    tushare_token: SecretStr | None = None
+
     notify_webhook_url: str | None = None
     portfolio_config_path: Path = Path("config/portfolio.example.yaml")
     watchlist_config_path: Path = Path("config/watchlist.yaml")

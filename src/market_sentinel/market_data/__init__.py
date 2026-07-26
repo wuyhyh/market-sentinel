@@ -7,6 +7,11 @@ from market_sentinel.market_data.errors import (
     MarketDataTimeoutError,
 )
 from market_sentinel.market_data.reference import DailyBarProvider, SecurityMasterProvider
+from market_sentinel.market_data.tushare import (
+    TushareDailyBarProvider,
+    TushareSecurityMasterProvider,
+    build_tushare_reference_providers,
+)
 
 __all__ = [
     "DailyBarProvider",
@@ -17,4 +22,7 @@ __all__ = [
     "MarketDataRateLimitError",
     "MarketDataTimeoutError",
     "SecurityMasterProvider",
+    "TushareDailyBarProvider",
+    "TushareSecurityMasterProvider",
+    "build_tushare_reference_providers",
 ]

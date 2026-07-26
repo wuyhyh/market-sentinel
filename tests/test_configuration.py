@@ -153,6 +153,21 @@ def test_api_keys_are_redacted_from_settings_output() -> None:
     assert all("**********" in rendered for rendered in rendered_settings)
 
 
+def test_tushare_token_is_a_redacted_secret() -> None:
+    secret_value = "tushare-secret-that-must-not-appear"
+    settings = make_settings(tushare_token=SecretStr(secret_value))
+
+    rendered_settings = (
+        repr(settings),
+        str(settings),
+        settings.model_dump_json(),
+    )
+
+    assert isinstance(settings.tushare_token, SecretStr)
+    assert all(secret_value not in rendered for rendered in rendered_settings)
+    assert all("**********" in rendered for rendered in rendered_settings)
+
+
 @pytest.mark.parametrize("path_kind", ["missing", "directory"])
 def test_invalid_portfolio_config_path_fails_explicitly(
     path_kind: Literal["missing", "directory"],

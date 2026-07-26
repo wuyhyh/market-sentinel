@@ -14,6 +14,7 @@ SYMBOL_PATTERN = re.compile(r"^[0-9]{6}\.(SH|SZ)$")
 class SecurityType(StrEnum):
     STOCK = "stock"
     ETF = "etf"
+    INDEX = "index"
 
 
 class SecurityRole(StrEnum):
@@ -88,19 +89,22 @@ class WatchSecurity(BaseModel):
             raise ValueError("market must be a_share")
 
         code, suffix = self.symbol.split(".")
-        expected_exchange = (
-            AShareExchange.SH
-            if code[0] in {"5", "6"}
-            else AShareExchange.SZ
-            if code[0] in {"0", "1", "2", "3"}
-            else None
-        )
-        if expected_exchange is None:
-            raise ValueError("symbol prefix is not supported for the A-share watchlist")
         if suffix != self.exchange.value:
             raise ValueError("symbol suffix must match exchange")
-        if self.exchange is not expected_exchange:
-            raise ValueError("symbol prefix must match exchange")
+        if self.security_type is not SecurityType.INDEX:
+            expected_exchange = (
+                AShareExchange.SH
+                if code[0] in {"5", "6"}
+                else AShareExchange.SZ
+                if code[0] in {"0", "1", "2", "3"}
+                else None
+            )
+            if expected_exchange is None:
+                raise ValueError(
+                    "symbol prefix is not supported for the A-share watchlist"
+                )
+            if self.exchange is not expected_exchange:
+                raise ValueError("symbol prefix must match exchange")
 
         if SecurityRole.HOLDING in self.roles:
             if not self.enabled:

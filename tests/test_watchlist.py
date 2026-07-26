@@ -139,7 +139,10 @@ def test_duplicate_security_is_rejected(tmp_path: Path) -> None:
             "symbol prefix must match exchange",
         ),
         ({"symbol": "600001.SH", "exchange": "SZ"}, "symbol suffix must match exchange"),
-        ({"security_type": "bond"}, "Input should be 'stock' or 'etf'"),
+        (
+            {"security_type": "bond"},
+            "Input should be 'stock', 'etf' or 'index'",
+        ),
     ],
 )
 def test_invalid_security_fields_are_rejected(

@@ -67,6 +67,7 @@ class MarketDataErrorCategory(StrEnum):
     AUTHORIZATION = "authorization"
     PROTOCOL = "protocol"
     QUALITY = "quality"
+    UNSUPPORTED = "unsupported"
 
 
 class ProviderError(BaseModel):
@@ -93,8 +94,8 @@ class SecurityMasterRecord(BaseModel):
     market: TradingMarket
     exchange: SecurityExchange
     security_type: SecurityCategory
-    currency: Currency
-    list_status: ListStatus
+    currency: Currency | None
+    list_status: ListStatus | None
     list_date: date | None = None
     source: Annotated[str, Field(min_length=1)]
     provider_symbol: Annotated[str, Field(min_length=1)] | None = None
@@ -118,6 +119,11 @@ class SecurityMasterRecord(BaseModel):
     def validate_a_share_identity(self) -> Self:
         if self.market is not TradingMarket.A_SHARE:
             raise ValueError("security master currently supports only the A-share market")
+        if self.security_type is not SecurityCategory.INDEX:
+            if self.currency is None:
+                raise ValueError("stock and ETF records must include currency")
+            if self.list_status is None:
+                raise ValueError("stock and ETF records must include list_status")
 
         match = _SYMBOL_PATTERN.fullmatch(self.symbol)
         if match is None:
@@ -181,6 +187,7 @@ class _BatchBase(BaseModel):
 
     requested_symbols: tuple[CanonicalSymbol, ...]
     missing_symbols: tuple[CanonicalSymbol, ...] = ()
+    unsupported_symbols: tuple[CanonicalSymbol, ...] = ()
     invalid_symbols: tuple[CanonicalSymbol, ...] = ()
     provider_errors: tuple[ProviderError, ...] = ()
     completeness: DataCompleteness
@@ -188,7 +195,12 @@ class _BatchBase(BaseModel):
     requested_at: datetime
     completed_at: datetime
 
-    @field_validator("requested_symbols", "missing_symbols", "invalid_symbols")
+    @field_validator(
+        "requested_symbols",
+        "missing_symbols",
+        "unsupported_symbols",
+        "invalid_symbols",
+    )
     @classmethod
     def require_unique_sorted_symbols(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(value) != len(set(value)):
@@ -228,16 +240,17 @@ class _BatchBase(BaseModel):
     def validate_common_batch_invariants(self) -> Self:
         requested = set(self.requested_symbols)
         missing = set(self.missing_symbols)
+        unsupported = set(self.unsupported_symbols)
         invalid = set(self.invalid_symbols)
 
         if not requested:
             raise ValueError("requested_symbols must not be empty")
         if self.completed_at < self.requested_at:
             raise ValueError("completed_at must not be earlier than requested_at")
-        if not missing <= requested or not invalid <= requested:
-            raise ValueError("missing_symbols and invalid_symbols must be requested symbols")
-        if missing & invalid:
-            raise ValueError("a symbol cannot be both missing and invalid")
+        if not missing <= requested or not unsupported <= requested or not invalid <= requested:
+            raise ValueError("batch issue symbols must be requested symbols")
+        if missing & unsupported or missing & invalid or unsupported & invalid:
+            raise ValueError("batch issue symbol categories must not overlap")
         for error in self.provider_errors:
             if error.symbol is not None and error.symbol not in requested:
                 raise ValueError("provider error symbol must be a requested symbol")
@@ -264,6 +277,7 @@ class SecurityMasterBatch(_BatchBase):
             requested_symbols=self.requested_symbols,
             data_symbols=tuple(record.symbol for record in self.records),
             missing_symbols=self.missing_symbols,
+            unsupported_symbols=self.unsupported_symbols,
             invalid_symbols=self.invalid_symbols,
             provider_errors=self.provider_errors,
             completeness=self.completeness,
@@ -291,6 +305,7 @@ class DailyBarBatch(_BatchBase):
             requested_symbols=self.requested_symbols,
             data_symbols=tuple(bar.symbol for bar in self.bars),
             missing_symbols=self.missing_symbols,
+            unsupported_symbols=self.unsupported_symbols,
             invalid_symbols=self.invalid_symbols,
             provider_errors=self.provider_errors,
             completeness=self.completeness,
@@ -306,6 +321,7 @@ def _validate_batch_completeness(
     requested_symbols: tuple[str, ...],
     data_symbols: tuple[str, ...],
     missing_symbols: tuple[str, ...],
+    unsupported_symbols: tuple[str, ...],
     invalid_symbols: tuple[str, ...],
     provider_errors: tuple[ProviderError, ...],
     completeness: DataCompleteness,
@@ -313,14 +329,15 @@ def _validate_batch_completeness(
     requested = set(requested_symbols)
     data = set(data_symbols)
     missing = set(missing_symbols)
+    unsupported = set(unsupported_symbols)
     invalid = set(invalid_symbols)
-    has_declared_issue = bool(missing or invalid or provider_errors)
+    has_declared_issue = bool(missing or unsupported or invalid or provider_errors)
     has_incomplete_result = bool(has_declared_issue or requested - data)
 
     if not data <= requested:
         raise ValueError("batch data must contain only requested symbols")
-    if data & (missing | invalid):
-        raise ValueError("a returned symbol cannot also be missing or invalid")
+    if data & (missing | unsupported | invalid):
+        raise ValueError("a returned symbol cannot also have a batch issue")
 
     if completeness is DataCompleteness.COMPLETE:
         if data != requested or has_incomplete_result:
