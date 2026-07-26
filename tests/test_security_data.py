@@ -113,12 +113,19 @@ def test_valid_unadjusted_daily_bar() -> None:
 
 
 @pytest.mark.parametrize(
-    "field",
-    ["previous_close", "open", "high", "low", "close"],
+    ("field", "value"),
+    [
+        (field, value)
+        for field in ("previous_close", "open", "high", "low", "close")
+        for value in (Decimal(0), Decimal("-0.01"))
+    ],
 )
-def test_daily_bar_rejects_non_positive_prices(field: str) -> None:
+def test_daily_bar_rejects_non_positive_prices(
+    field: str,
+    value: Decimal,
+) -> None:
     payload = daily_bar_data()
-    payload[field] = Decimal(0)
+    payload[field] = value
 
     with pytest.raises(ValidationError):
         DailyBar.model_validate(payload)
@@ -164,6 +171,33 @@ def test_daily_bar_rejects_invalid_trade_date() -> None:
         DailyBar.model_validate(daily_bar_data(trade_date="2026-02-30"))
 
 
+def test_index_daily_bar_uses_the_same_provider_independent_daily_model() -> None:
+    bar = DailyBar.model_validate(
+        daily_bar_data(symbol="000001.SH"),
+    )
+
+    assert bar.symbol == "000001.SH"
+    assert bar.trade_date == date(2026, 7, 24)
+    assert "source_time" not in DailyBar.model_fields
+
+
+def test_daily_bar_converts_string_numbers_to_decimal_fields() -> None:
+    payload = daily_bar_data()
+    for field in ("previous_close", "open", "high", "low", "close", "turnover"):
+        payload[field] = str(payload[field])
+
+    bar = DailyBar.model_validate(payload)
+
+    assert isinstance(bar.previous_close, Decimal)
+    assert isinstance(bar.open, Decimal)
+    assert isinstance(bar.high, Decimal)
+    assert isinstance(bar.low, Decimal)
+    assert isinstance(bar.close, Decimal)
+    assert isinstance(bar.turnover, Decimal)
+    assert bar.close == Decimal("56.00")
+    assert bar.turnover == Decimal("6853200.50")
+
+
 def test_missing_ordinary_symbol_produces_partial_security_master_batch() -> None:
     record = SecurityMasterRecord.model_validate(security_record_data())
     batch = SecurityMasterBatch(
@@ -179,6 +213,23 @@ def test_missing_ordinary_symbol_produces_partial_security_master_batch() -> Non
     assert batch.completeness is DataCompleteness.PARTIAL
     assert batch.missing_symbols == ("000333.SZ",)
     assert tuple(record.symbol for record in batch.records) == ("600183.SH",)
+
+
+def test_unsupported_security_produces_partial_batch() -> None:
+    record = SecurityMasterRecord.model_validate(security_record_data())
+    batch = SecurityMasterBatch(
+        requested_symbols=("510300.SH", "600183.SH"),
+        records=(record,),
+        unsupported_symbols=("510300.SH",),
+        completeness=DataCompleteness.PARTIAL,
+        source="fixture",
+        requested_at=REQUESTED_AT,
+        completed_at=RECEIVED_AT,
+    )
+
+    assert batch.completeness is DataCompleteness.PARTIAL
+    assert batch.unsupported_symbols == ("510300.SH",)
+    assert batch.missing_symbols == ()
 
 
 def test_provider_wide_failure_produces_failed_daily_bar_batch() -> None:
@@ -199,6 +250,64 @@ def test_provider_wide_failure_produces_failed_daily_bar_batch() -> None:
     assert batch.completeness is DataCompleteness.FAILED
     assert batch.bars == ()
     assert batch.provider_errors == (error,)
+
+
+def test_all_missing_requests_produce_failed_batch() -> None:
+    batch = DailyBarBatch(
+        requested_symbols=("000001.SH", "600183.SH"),
+        bars=(),
+        missing_symbols=("600183.SH", "000001.SH"),
+        completeness=DataCompleteness.FAILED,
+        source="fixture",
+        requested_at=REQUESTED_AT,
+        completed_at=RECEIVED_AT,
+    )
+
+    assert batch.completeness is DataCompleteness.FAILED
+    assert batch.missing_symbols == ("000001.SH", "600183.SH")
+    assert batch.bars == ()
+
+
+def test_duplicate_requested_symbols_are_rejected() -> None:
+    record = SecurityMasterRecord.model_validate(security_record_data())
+
+    with pytest.raises(ValidationError, match="must not contain duplicates"):
+        SecurityMasterBatch(
+            requested_symbols=("600183.SH", "600183.SH"),
+            records=(record,),
+            completeness=DataCompleteness.COMPLETE,
+            source="fixture",
+            requested_at=REQUESTED_AT,
+            completed_at=RECEIVED_AT,
+        )
+
+
+def test_duplicate_security_master_records_are_rejected() -> None:
+    record = SecurityMasterRecord.model_validate(security_record_data())
+
+    with pytest.raises(ValidationError, match="duplicate symbols"):
+        SecurityMasterBatch(
+            requested_symbols=("600183.SH",),
+            records=(record, record),
+            completeness=DataCompleteness.COMPLETE,
+            source="fixture",
+            requested_at=REQUESTED_AT,
+            completed_at=RECEIVED_AT,
+        )
+
+
+def test_duplicate_daily_symbol_date_pairs_are_rejected() -> None:
+    bar = DailyBar.model_validate(daily_bar_data())
+
+    with pytest.raises(ValidationError, match="duplicate symbol/date pairs"):
+        DailyBarBatch(
+            requested_symbols=("600183.SH",),
+            bars=(bar, bar),
+            completeness=DataCompleteness.COMPLETE,
+            source="fixture",
+            requested_at=REQUESTED_AT,
+            completed_at=RECEIVED_AT,
+        )
 
 
 def test_batch_output_is_stable_for_different_input_order() -> None:
