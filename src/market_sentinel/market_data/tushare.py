@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import math
 import re
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
@@ -119,14 +120,13 @@ class _TushareReferenceProvider:
     async def _fetch_rows(
         self,
         api_name: str,
-        symbol: str,
         request_kwargs: Mapping[str, str],
     ) -> tuple[list[Mapping[str, object]], ProviderError | None]:
         try:
             api = cast(Callable[..., object], getattr(self._client, api_name))
             table = await asyncio.to_thread(api, **dict(request_kwargs))
         except Exception as error:  # noqa: BLE001 - provider errors become structured metadata
-            return [], self._provider_error(error, symbol)
+            return [], self._provider_error(error)
 
         try:
             return _records_from_table(table), None
@@ -135,16 +135,14 @@ class _TushareReferenceProvider:
                 category=MarketDataErrorCategory.PROTOCOL,
                 code="invalid_response",
                 message=_sanitize_error(error, self._token),
-                symbol=symbol,
             )
 
-    def _provider_error(self, error: BaseException, symbol: str) -> ProviderError:
+    def _provider_error(self, error: BaseException) -> ProviderError:
         category, code = _classify_error(error)
         return ProviderError(
             category=category,
             code=code,
             message=_sanitize_error(error, self._token),
-            symbol=symbol,
         )
 
     @staticmethod
@@ -169,6 +167,8 @@ class TushareSecurityMasterProvider(
         unsupported: list[str] = []
         invalid: list[str] = []
         errors: list[ProviderError] = []
+        stock_symbols: list[str] = []
+        index_symbols: list[str] = []
 
         for symbol in requested:
             security_type = self._security_types.get(symbol)
@@ -179,58 +179,87 @@ class TushareSecurityMasterProvider(
             if security_type is SecurityCategory.ETF:
                 unsupported.append(symbol)
                 continue
+            if security_type is SecurityCategory.STOCK:
+                stock_symbols.append(symbol)
+            else:
+                index_symbols.append(symbol)
 
-            api_name = (
-                "stock_basic"
-                if security_type is SecurityCategory.STOCK
-                else "index_basic"
-            )
-            fields = (
-                _STOCK_BASIC_FIELDS
-                if security_type is SecurityCategory.STOCK
-                else _INDEX_BASIC_FIELDS
-            )
+        endpoint_requests = (
+            (
+                "stock_basic",
+                tuple(stock_symbols),
+                SecurityCategory.STOCK,
+                {
+                    "exchange": "",
+                    "list_status": "L",
+                    "fields": _STOCK_BASIC_FIELDS,
+                },
+            ),
+            (
+                "index_basic",
+                tuple(index_symbols),
+                SecurityCategory.INDEX,
+                {"fields": _INDEX_BASIC_FIELDS},
+            ),
+        )
+        for api_name, endpoint_symbols, security_type, request_kwargs in endpoint_requests:
+            if not endpoint_symbols:
+                continue
             rows, provider_error = await self._fetch_rows(
                 api_name,
-                symbol,
-                {"ts_code": symbol, "fields": fields},
+                request_kwargs,
             )
             if provider_error is not None:
                 errors.append(provider_error)
                 continue
-            if not rows:
-                missing.append(symbol)
-                continue
 
             try:
-                record = _convert_security_master_row(
-                    rows,
-                    requested_symbol=symbol,
-                    security_type=security_type,
-                    received_at=self._now(),
-                )
+                grouped_rows = _group_requested_rows(rows, endpoint_symbols)
             except _ResponseProtocolError as error:
-                invalid.append(symbol)
                 errors.append(
                     ProviderError(
                         category=MarketDataErrorCategory.PROTOCOL,
                         code="invalid_response",
                         message=_sanitize_error(error, self._token),
-                        symbol=symbol,
                     )
                 )
-            except (_ResponseQualityError, ValidationError) as error:
-                invalid.append(symbol)
-                errors.append(
-                    ProviderError(
-                        category=MarketDataErrorCategory.QUALITY,
-                        code="invalid_record",
-                        message=_sanitize_error(error, self._token),
-                        symbol=symbol,
+                continue
+
+            received_at = self._now()
+            for symbol in endpoint_symbols:
+                symbol_rows = grouped_rows[symbol]
+                if not symbol_rows:
+                    missing.append(symbol)
+                    continue
+                try:
+                    record = _convert_security_master_row(
+                        symbol_rows,
+                        requested_symbol=symbol,
+                        security_type=security_type,
+                        received_at=received_at,
                     )
-                )
-            else:
-                records.append(record)
+                except _ResponseProtocolError as error:
+                    invalid.append(symbol)
+                    errors.append(
+                        ProviderError(
+                            category=MarketDataErrorCategory.PROTOCOL,
+                            code="invalid_response",
+                            message=_sanitize_error(error, self._token),
+                            symbol=symbol,
+                        )
+                    )
+                except (_ResponseQualityError, ValidationError) as error:
+                    invalid.append(symbol)
+                    errors.append(
+                        ProviderError(
+                            category=MarketDataErrorCategory.QUALITY,
+                            code="invalid_record",
+                            message=_sanitize_error(error, self._token),
+                            symbol=symbol,
+                        )
+                    )
+                else:
+                    records.append(record)
 
         completed_at = self._now()
         completeness = _completeness(
@@ -244,7 +273,7 @@ class TushareSecurityMasterProvider(
             missing_symbols=tuple(missing),
             unsupported_symbols=tuple(unsupported),
             invalid_symbols=tuple(invalid),
-            provider_errors=tuple(errors),
+            provider_errors=_deduplicate_provider_errors(errors),
             completeness=completeness,
             source=TUSHARE_SOURCE,
             requested_at=requested_at,
@@ -264,6 +293,10 @@ class TushareDailyBarProvider(
     ) -> DailyBarBatch:
         if end_date < start_date:
             raise MarketDataQualityError("end_date must not be earlier than start_date")
+        if end_date != start_date:
+            raise MarketDataQualityError(
+                "Tushare batch daily requests must target exactly one trade date"
+            )
 
         requested_at = self._now()
         requested = self._requested_symbols(symbols)
@@ -272,6 +305,8 @@ class TushareDailyBarProvider(
         unsupported: list[str] = []
         invalid: list[str] = []
         errors: list[ProviderError] = []
+        stock_symbols: list[str] = []
+        index_symbols: list[str] = []
 
         for symbol in requested:
             security_type = self._security_types.get(symbol)
@@ -282,56 +317,78 @@ class TushareDailyBarProvider(
             if security_type is SecurityCategory.ETF:
                 unsupported.append(symbol)
                 continue
+            if security_type is SecurityCategory.STOCK:
+                stock_symbols.append(symbol)
+            else:
+                index_symbols.append(symbol)
 
-            api_name = "daily" if security_type is SecurityCategory.STOCK else "index_daily"
+        endpoint_requests = (
+            ("daily", tuple(stock_symbols), SecurityCategory.STOCK),
+            ("index_daily", tuple(index_symbols), SecurityCategory.INDEX),
+        )
+        for api_name, endpoint_symbols, security_type in endpoint_requests:
+            if not endpoint_symbols:
+                continue
             rows, provider_error = await self._fetch_rows(
                 api_name,
-                symbol,
                 {
-                    "ts_code": symbol,
-                    "start_date": start_date.strftime("%Y%m%d"),
-                    "end_date": end_date.strftime("%Y%m%d"),
+                    "trade_date": start_date.strftime("%Y%m%d"),
                     "fields": _DAILY_FIELDS,
                 },
             )
             if provider_error is not None:
                 errors.append(provider_error)
                 continue
-            if not rows:
-                missing.append(symbol)
-                continue
 
             try:
-                converted = _convert_daily_rows(
-                    rows,
-                    requested_symbol=symbol,
-                    start_date=start_date,
-                    end_date=end_date,
-                    received_at=self._now(),
-                    security_type=security_type,
-                )
+                grouped_rows = _group_requested_rows(rows, endpoint_symbols)
             except _ResponseProtocolError as error:
-                invalid.append(symbol)
                 errors.append(
                     ProviderError(
                         category=MarketDataErrorCategory.PROTOCOL,
                         code="invalid_response",
                         message=_sanitize_error(error, self._token),
-                        symbol=symbol,
                     )
                 )
-            except (_ResponseQualityError, ValidationError) as error:
-                invalid.append(symbol)
-                errors.append(
-                    ProviderError(
-                        category=MarketDataErrorCategory.QUALITY,
-                        code="invalid_record",
-                        message=_sanitize_error(error, self._token),
-                        symbol=symbol,
+                continue
+
+            received_at = self._now()
+            for symbol in endpoint_symbols:
+                symbol_rows = grouped_rows[symbol]
+                if not symbol_rows:
+                    missing.append(symbol)
+                    continue
+                try:
+                    converted = _convert_daily_rows(
+                        symbol_rows,
+                        requested_symbol=symbol,
+                        start_date=start_date,
+                        end_date=end_date,
+                        received_at=received_at,
+                        security_type=security_type,
                     )
-                )
-            else:
-                bars.extend(converted)
+                except _ResponseProtocolError as error:
+                    invalid.append(symbol)
+                    errors.append(
+                        ProviderError(
+                            category=MarketDataErrorCategory.PROTOCOL,
+                            code="invalid_response",
+                            message=_sanitize_error(error, self._token),
+                            symbol=symbol,
+                        )
+                    )
+                except (_ResponseQualityError, ValidationError) as error:
+                    invalid.append(symbol)
+                    errors.append(
+                        ProviderError(
+                            category=MarketDataErrorCategory.QUALITY,
+                            code="invalid_record",
+                            message=_sanitize_error(error, self._token),
+                            symbol=symbol,
+                        )
+                    )
+                else:
+                    bars.extend(converted)
 
         completed_at = self._now()
         returned_symbols = {bar.symbol for bar in bars}
@@ -346,7 +403,7 @@ class TushareDailyBarProvider(
             missing_symbols=tuple(missing),
             unsupported_symbols=tuple(unsupported),
             invalid_symbols=tuple(invalid),
-            provider_errors=tuple(errors),
+            provider_errors=_deduplicate_provider_errors(errors),
             completeness=completeness,
             source=TUSHARE_SOURCE,
             requested_at=requested_at,
@@ -403,6 +460,20 @@ def _records_from_table(table: object) -> list[Mapping[str, object]]:
     if not all(isinstance(record, Mapping) for record in records):
         raise _ResponseProtocolError("Tushare response contains a non-mapping row")
     return [cast(Mapping[str, object], record) for record in records]
+
+
+def _group_requested_rows(
+    rows: Sequence[Mapping[str, object]],
+    requested_symbols: Sequence[str],
+) -> dict[str, list[Mapping[str, object]]]:
+    grouped: dict[str, list[Mapping[str, object]]] = {
+        symbol: [] for symbol in requested_symbols
+    }
+    for row in rows:
+        symbol = _required_text(row, "ts_code")
+        if symbol in grouped:
+            grouped[symbol].append(row)
+    return grouped
 
 
 def _convert_security_master_row(
@@ -606,6 +677,24 @@ def _completeness(
     return DataCompleteness.FAILED
 
 
+def _deduplicate_provider_errors(
+    errors: Sequence[ProviderError],
+) -> tuple[ProviderError, ...]:
+    unique: dict[
+        tuple[MarketDataErrorCategory, str | None, str, str | None],
+        ProviderError,
+    ] = {}
+    for error in errors:
+        identity = (
+            error.category,
+            error.code,
+            error.message,
+            error.symbol,
+        )
+        unique.setdefault(identity, error)
+    return tuple(unique.values())
+
+
 def _classify_error(
     error: BaseException,
 ) -> tuple[MarketDataErrorCategory, str]:
@@ -633,9 +722,13 @@ def _classify_error(
         "forbidden",
     )
     rate_limit_markers = (
+        "频率超限",
         "每分钟最多",
         "访问频次",
         "频率限制",
+        "次/分钟",
+        "次/小时",
+        "次/天",
         "rate limit",
         "too many requests",
         "429",
@@ -657,7 +750,10 @@ def _classify_error(
 
 
 def _sanitize_error(error: BaseException, token: SecretStr | None) -> str:
-    message = str(error)
+    message = "".join(
+        " " if unicodedata.category(character) in {"Cc", "Cf", "Co", "Cs"} else character
+        for character in str(error)
+    )
     if token is not None:
         secret = token.get_secret_value()
         if secret:

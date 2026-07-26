@@ -4,7 +4,6 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
-from typing import cast
 
 import pytest
 from pydantic import SecretStr
@@ -135,10 +134,16 @@ def daily_row(
 
 @pytest.mark.asyncio
 async def test_stock_basic_converts_shanghai_and_shenzhen_records() -> None:
-    def response(**kwargs: object) -> FakeTable:
-        return FakeTable([stock_basic_row(cast(str, kwargs["ts_code"]))])
-
-    client = FakeClient({"stock_basic": response})
+    client = FakeClient(
+        {
+            "stock_basic": FakeTable(
+                [
+                    stock_basic_row("600183.SH"),
+                    stock_basic_row("000333.SZ"),
+                ]
+            )
+        }
+    )
     provider = TushareSecurityMasterProvider(
         client,
         {
@@ -160,16 +165,34 @@ async def test_stock_basic_converts_shanghai_and_shenzhen_records() -> None:
         SecurityExchange.XSHG,
     )
     assert all(record.source == TUSHARE_SOURCE for record in batch.records)
-    assert [api_name for api_name, _ in client.calls] == [
-        "stock_basic",
-        "stock_basic",
-    ]
-    assert {cast(str, kwargs["ts_code"]) for _, kwargs in client.calls} == {
-        "000333.SZ",
-        "600183.SH",
-    }
+    assert [api_name for api_name, _ in client.calls] == ["stock_basic"]
+    assert "ts_code" not in client.calls[0][1]
+    assert client.calls[0][1]["list_status"] == "L"
     assert all(not isinstance(record, FakeTable) for record in batch.records)
     assert TUSHARE_SOURCE == "tushare"
+
+
+@pytest.mark.asyncio
+async def test_dozen_stock_master_request_uses_one_stock_basic_call() -> None:
+    symbols = tuple(
+        [f"{600000 + index:06d}.SH" for index in range(20)]
+        + [f"{index + 1:06d}.SZ" for index in range(20)]
+    )
+    client = FakeClient(
+        {"stock_basic": FakeTable([stock_basic_row(symbol) for symbol in symbols])}
+    )
+    provider = TushareSecurityMasterProvider(
+        client,
+        {symbol: SecurityCategory.STOCK for symbol in symbols},
+        now=lambda: FIXED_NOW,
+    )
+
+    batch = await provider.get_security_master(tuple(reversed(symbols)))
+
+    assert batch.completeness is DataCompleteness.COMPLETE
+    assert len(batch.records) == 40
+    assert [api_name for api_name, _ in client.calls] == ["stock_basic"]
+    assert all(api_name != "index_basic" for api_name, _ in client.calls)
 
 
 @pytest.mark.asyncio
@@ -222,9 +245,7 @@ async def test_stock_daily_converts_lots_and_thousand_cny_exactly() -> None:
         (
             "daily",
             {
-                "ts_code": "600183.SH",
-                "start_date": "20260724",
-                "end_date": "20260724",
+                "trade_date": "20260724",
                 "fields": (
                     "ts_code,trade_date,open,high,low,close,"
                     "pre_close,vol,amount"
@@ -232,6 +253,33 @@ async def test_stock_daily_converts_lots_and_thousand_cny_exactly() -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_dozen_stock_daily_request_uses_one_daily_call() -> None:
+    symbols = tuple(
+        [f"{600000 + index:06d}.SH" for index in range(20)]
+        + [f"{index + 1:06d}.SZ" for index in range(20)]
+    )
+    client = FakeClient(
+        {"daily": FakeTable([daily_row(symbol) for symbol in symbols])}
+    )
+    provider = TushareDailyBarProvider(
+        client,
+        {symbol: SecurityCategory.STOCK for symbol in symbols},
+        now=lambda: FIXED_NOW,
+    )
+
+    batch = await provider.get_daily_bars(
+        tuple(reversed(symbols)),
+        TRADE_DATE,
+        TRADE_DATE,
+    )
+
+    assert batch.completeness is DataCompleteness.COMPLETE
+    assert len(batch.bars) == 40
+    assert [api_name for api_name, _ in client.calls] == ["daily"]
+    assert all(api_name != "index_daily" for api_name, _ in client.calls)
 
 
 @pytest.mark.asyncio
@@ -322,6 +370,16 @@ async def test_etf_is_explicitly_unsupported_without_any_api_call() -> None:
             "rate_limited",
         ),
         (
+            RuntimeError("频率超限(1次/分钟)"),
+            MarketDataErrorCategory.RATE_LIMIT,
+            "rate_limited",
+        ),
+        (
+            RuntimeError("该接口最多访问5次/天"),
+            MarketDataErrorCategory.RATE_LIMIT,
+            "rate_limited",
+        ),
+        (
             RuntimeError("抱歉，您输入的TOKEN无效！"),
             MarketDataErrorCategory.AUTHORIZATION,
             "authentication_failed",
@@ -356,6 +414,31 @@ async def test_provider_errors_are_structurally_classified(
     assert batch.completeness is DataCompleteness.FAILED
     assert batch.provider_errors[0].category is category
     assert batch.provider_errors[0].code == code
+
+
+@pytest.mark.asyncio
+async def test_control_characters_are_cleaned_without_changing_classification() -> None:
+    client = FakeClient(
+        {"daily": RuntimeError("频率超限\x00\x01(1次/分钟)\ue000 请稍后重试")}
+    )
+    provider = TushareDailyBarProvider(
+        client,
+        {"600183.SH": SecurityCategory.STOCK},
+        now=lambda: FIXED_NOW,
+    )
+
+    batch = await provider.get_daily_bars(
+        ("600183.SH",),
+        TRADE_DATE,
+        TRADE_DATE,
+    )
+
+    error = batch.provider_errors[0]
+    assert error.category is MarketDataErrorCategory.RATE_LIMIT
+    assert error.code == "rate_limited"
+    assert error.message == "频率超限 (1次/分钟) 请稍后重试"
+    assert "\x00" not in error.message
+    assert "\ue000" not in error.message
 
 
 @pytest.mark.asyncio
@@ -397,15 +480,7 @@ async def test_empty_dataframe_is_reported_as_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_one_empty_response_degrades_batch_to_partial() -> None:
-    def response(**kwargs: object) -> FakeTable:
-        symbol = cast(str, kwargs["ts_code"])
-        return (
-            FakeTable([daily_row(symbol)])
-            if symbol == "600183.SH"
-            else FakeTable([])
-        )
-
-    client = FakeClient({"daily": response})
+    client = FakeClient({"daily": FakeTable([daily_row("600183.SH")])})
     provider = TushareDailyBarProvider(
         client,
         {
@@ -424,6 +499,7 @@ async def test_one_empty_response_degrades_batch_to_partial() -> None:
     assert batch.completeness is DataCompleteness.PARTIAL
     assert tuple(bar.symbol for bar in batch.bars) == ("600183.SH",)
     assert batch.missing_symbols == ("000333.SZ",)
+    assert [api_name for api_name, _ in client.calls] == ["daily"]
 
 
 @pytest.mark.asyncio
@@ -446,14 +522,40 @@ async def test_all_provider_requests_failing_produces_failed_batch() -> None:
 
     assert batch.completeness is DataCompleteness.FAILED
     assert batch.bars == ()
-    assert tuple(error.symbol for error in batch.provider_errors) == (
-        "000333.SZ",
-        "600183.SH",
+    assert len(batch.provider_errors) == 1
+    assert batch.provider_errors[0].symbol is None
+    assert batch.provider_errors[0].category is MarketDataErrorCategory.TIMEOUT
+    assert [api_name for api_name, _ in client.calls] == ["daily"]
+
+
+@pytest.mark.asyncio
+async def test_identical_batch_errors_from_separate_endpoints_are_deduplicated() -> None:
+    rate_error = RuntimeError("频率超限(1次/分钟)")
+    client = FakeClient(
+        {
+            "daily": rate_error,
+            "index_daily": rate_error,
+        }
     )
-    assert all(
-        error.category is MarketDataErrorCategory.TIMEOUT
-        for error in batch.provider_errors
+    provider = TushareDailyBarProvider(
+        client,
+        {
+            "000001.SH": SecurityCategory.INDEX,
+            "600183.SH": SecurityCategory.STOCK,
+        },
+        now=lambda: FIXED_NOW,
     )
+
+    batch = await provider.get_daily_bars(
+        ("600183.SH", "000001.SH"),
+        TRADE_DATE,
+        TRADE_DATE,
+    )
+
+    assert batch.completeness is DataCompleteness.FAILED
+    assert len(batch.provider_errors) == 1
+    assert batch.provider_errors[0].category is MarketDataErrorCategory.RATE_LIMIT
+    assert [api_name for api_name, _ in client.calls] == ["daily", "index_daily"]
 
 
 @pytest.mark.asyncio
@@ -518,44 +620,59 @@ async def test_daily_rejects_duplicate_symbol_and_date_rows() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("api_name", ["stock_basic", "daily"])
-async def test_unrequested_response_symbol_is_a_protocol_error(
-    api_name: str,
-) -> None:
-    response = (
-        FakeTable(
-            [
-                stock_basic_row("600183.SH"),
-                stock_basic_row("000333.SZ"),
-            ]
-        )
-        if api_name == "stock_basic"
-        else FakeTable([daily_row("000333.SZ")])
+async def test_stock_basic_filters_unrequested_full_market_rows() -> None:
+    client = FakeClient(
+        {
+            "stock_basic": FakeTable(
+                [
+                    stock_basic_row("000333.SZ"),
+                    stock_basic_row("600183.SH"),
+                ]
+            )
+        }
     )
-    client = FakeClient({api_name: response})
-    security_types = {"600183.SH": SecurityCategory.STOCK}
-    if api_name == "stock_basic":
-        master_batch = await TushareSecurityMasterProvider(
-            client,
-            security_types,
-            now=lambda: FIXED_NOW,
-        ).get_security_master(("600183.SH",))
-        completeness = master_batch.completeness
-        invalid_symbols = master_batch.invalid_symbols
-        provider_errors = master_batch.provider_errors
-    else:
-        daily_batch = await TushareDailyBarProvider(
-            client,
-            security_types,
-            now=lambda: FIXED_NOW,
-        ).get_daily_bars(("600183.SH",), TRADE_DATE, TRADE_DATE)
-        completeness = daily_batch.completeness
-        invalid_symbols = daily_batch.invalid_symbols
-        provider_errors = daily_batch.provider_errors
+    provider = TushareSecurityMasterProvider(
+        client,
+        {"600183.SH": SecurityCategory.STOCK},
+        now=lambda: FIXED_NOW,
+    )
 
-    assert completeness is DataCompleteness.FAILED
-    assert invalid_symbols == ("600183.SH",)
-    assert provider_errors[0].category is MarketDataErrorCategory.PROTOCOL
+    batch = await provider.get_security_master(("600183.SH",))
+
+    assert batch.completeness is DataCompleteness.COMPLETE
+    assert tuple(record.symbol for record in batch.records) == ("600183.SH",)
+    assert batch.missing_symbols == ()
+    assert batch.invalid_symbols == ()
+
+
+@pytest.mark.asyncio
+async def test_daily_filters_unrequested_full_market_rows() -> None:
+    client = FakeClient(
+        {
+            "daily": FakeTable(
+                [
+                    daily_row("000333.SZ"),
+                    daily_row("600183.SH"),
+                ]
+            )
+        }
+    )
+    provider = TushareDailyBarProvider(
+        client,
+        {"600183.SH": SecurityCategory.STOCK},
+        now=lambda: FIXED_NOW,
+    )
+
+    batch = await provider.get_daily_bars(
+        ("600183.SH",),
+        TRADE_DATE,
+        TRADE_DATE,
+    )
+
+    assert batch.completeness is DataCompleteness.COMPLETE
+    assert tuple(bar.symbol for bar in batch.bars) == ("600183.SH",)
+    assert batch.missing_symbols == ()
+    assert batch.invalid_symbols == ()
 
 
 @pytest.mark.asyncio
@@ -581,13 +698,16 @@ async def test_inexact_lot_conversion_is_rejected_as_quality_error() -> None:
 
 @pytest.mark.asyncio
 async def test_output_is_stable_for_different_requested_symbol_order() -> None:
-    def response(**kwargs: object) -> FakeTable:
-        return FakeTable([daily_row(cast(str, kwargs["ts_code"]))])
-
     security_types = {
         "000333.SZ": SecurityCategory.STOCK,
         "600183.SH": SecurityCategory.STOCK,
     }
+    response = FakeTable(
+        [
+            daily_row("600183.SH"),
+            daily_row("000333.SZ"),
+        ]
+    )
     first = await TushareDailyBarProvider(
         FakeClient({"daily": response}),
         security_types,

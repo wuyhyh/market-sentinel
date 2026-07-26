@@ -1,10 +1,11 @@
 import argparse
 import asyncio
 import json
+import os
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from market_sentinel.bootstrap import build_report_service
 from market_sentinel.config import get_settings
@@ -120,6 +121,11 @@ def _add_reference_common_arguments(parser: argparse.ArgumentParser) -> None:
         default="all",
         help="Select all configured securities, stocks only, or indices only",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the remote-call plan without loading credentials or calling Tushare",
+    )
 
 
 def _iso_date(value: str) -> date:
@@ -130,19 +136,27 @@ def _iso_date(value: str) -> date:
 
 
 async def _run_reference_command(args: argparse.Namespace) -> int:
-    settings = get_settings()
-    config_path = args.config or settings.watchlist_config_path
+    settings = None if args.dry_run else get_settings()
+    config_path = (
+        args.config
+        or (
+            Path(os.environ.get("WATCHLIST_CONFIG_PATH", "config/watchlist.yaml"))
+            if settings is None
+            else settings.watchlist_config_path
+        )
+    )
     try:
         watchlist = WatchlistLoader().load(config_path)
     except WatchlistConfigurationError as error:
         _print_reference_summary(
             status="failed",
             requested_count=0,
+            supported_count=0,
             returned_count=0,
-            missing_symbols=(),
-            unsupported_symbols=(),
-            invalid_symbols=(),
-            provider_errors=tuple(issue.as_dict() for issue in error.issues),
+            missing_count=0,
+            unsupported_count=0,
+            invalid_count=0,
+            provider_error_counts={"configuration": len(error.issues)},
             output_path=None,
         )
         return 2
@@ -160,18 +174,12 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
         _print_reference_summary(
             status="failed",
             requested_count=0,
+            supported_count=0,
             returned_count=0,
-            missing_symbols=(),
-            unsupported_symbols=(),
-            invalid_symbols=(),
-            provider_errors=(
-                {
-                    "category": "quality",
-                    "code": "empty_selection",
-                    "message": "watchlist selection contains no enabled securities",
-                    "symbol": None,
-                },
-            ),
+            missing_count=0,
+            unsupported_count=0,
+            invalid_count=0,
+            provider_error_counts={"quality": 1},
             output_path=None,
         )
         return 2
@@ -181,6 +189,31 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
         security.symbol: _reference_security_type(security.security_type)
         for security in selected
     }
+    stock_count = sum(
+        security_type is SecurityCategory.STOCK
+        for security_type in security_types.values()
+    )
+    etf_count = sum(
+        security_type is SecurityCategory.ETF
+        for security_type in security_types.values()
+    )
+    index_count = sum(
+        security_type is SecurityCategory.INDEX
+        for security_type in security_types.values()
+    )
+    supported_count = stock_count + index_count
+    if args.dry_run:
+        _print_reference_dry_run(
+            command=args.reference_command,
+            requested_count=len(symbols),
+            stock_count=stock_count,
+            etf_count=etf_count,
+            index_count=index_count,
+        )
+        return 0
+
+    if settings is None:
+        raise RuntimeError("settings must be loaded for a real reference-data request")
     try:
         security_master_provider, daily_bar_provider = (
             build_tushare_reference_providers(settings, security_types)
@@ -189,18 +222,12 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
         _print_reference_summary(
             status="failed",
             requested_count=len(symbols),
+            supported_count=supported_count,
             returned_count=0,
-            missing_symbols=(),
-            unsupported_symbols=(),
-            invalid_symbols=(),
-            provider_errors=(
-                {
-                    "category": _provider_exception_category(error),
-                    "code": error.__class__.__name__,
-                    "message": str(error),
-                    "symbol": None,
-                },
-            ),
+            missing_count=0,
+            unsupported_count=etf_count,
+            invalid_count=0,
+            provider_error_counts={_provider_exception_category(error): 1},
             output_path=None,
         )
         return 2
@@ -230,12 +257,13 @@ async def _run_reference_command(args: argparse.Namespace) -> int:
     _print_reference_summary(
         status=batch.completeness.value,
         requested_count=len(batch.requested_symbols),
+        supported_count=supported_count,
         returned_count=returned_count,
-        missing_symbols=batch.missing_symbols,
-        unsupported_symbols=batch.unsupported_symbols,
-        invalid_symbols=batch.invalid_symbols,
-        provider_errors=tuple(
-            error.model_dump(mode="json") for error in batch.provider_errors
+        missing_count=len(batch.missing_symbols),
+        unsupported_count=len(batch.unsupported_symbols),
+        invalid_count=len(batch.invalid_symbols),
+        provider_error_counts=dict(
+            sorted(Counter(error.category.value for error in batch.provider_errors).items())
         ),
         output_path=output_path,
     )
@@ -254,7 +282,7 @@ def _provider_exception_category(error: MarketDataProviderError) -> str:
     if isinstance(error, MarketDataAuthorizationError):
         return "authorization"
     if isinstance(error, MarketDataRateLimitError):
-        return "rate_limit"
+        return "rate_limited"
     if isinstance(error, MarketDataTimeoutError):
         return "timeout"
     if isinstance(error, MarketDataQualityError):
@@ -283,11 +311,12 @@ def _print_reference_summary(
     *,
     status: str,
     requested_count: int,
+    supported_count: int,
     returned_count: int,
-    missing_symbols: Sequence[str],
-    unsupported_symbols: Sequence[str],
-    invalid_symbols: Sequence[str],
-    provider_errors: Sequence[dict[str, Any]],
+    missing_count: int,
+    unsupported_count: int,
+    invalid_count: int,
+    provider_error_counts: dict[str, int],
     output_path: Path | None,
 ) -> None:
     print(
@@ -295,12 +324,49 @@ def _print_reference_summary(
             {
                 "status": status,
                 "requested_count": requested_count,
+                "supported_count": supported_count,
                 "returned_count": returned_count,
-                "missing_symbols": list(missing_symbols),
-                "unsupported_symbols": list(unsupported_symbols),
-                "invalid_symbols": list(invalid_symbols),
-                "provider_errors": list(provider_errors),
+                "missing_count": missing_count,
+                "unsupported_count": unsupported_count,
+                "invalid_count": invalid_count,
+                "provider_error_counts": dict(sorted(provider_error_counts.items())),
                 "output_path": output_path.as_posix() if output_path else None,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _print_reference_dry_run(
+    *,
+    command: str,
+    requested_count: int,
+    stock_count: int,
+    etf_count: int,
+    index_count: int,
+) -> None:
+    api_names = (
+        ("stock_basic", "index_basic")
+        if command == "security-master"
+        else ("daily", "index_daily")
+    )
+    planned_calls = {
+        api_names[0]: int(stock_count > 0),
+        api_names[1]: int(index_count > 0),
+    }
+    print(
+        json.dumps(
+            {
+                "status": "dry_run",
+                "requested_count": requested_count,
+                "supported_count": stock_count + index_count,
+                "stock_count": stock_count,
+                "etf_count": etf_count,
+                "index_count": index_count,
+                "unsupported_count": etf_count,
+                "planned_calls": planned_calls,
+                "total_planned_calls": sum(planned_calls.values()),
             },
             ensure_ascii=False,
             sort_keys=True,

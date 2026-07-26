@@ -68,7 +68,7 @@ class AdjustmentMode(StrEnum):
 class MarketDataErrorCategory(StrEnum):
     PROVIDER = "provider_error"
     TIMEOUT = "timeout"
-    RATE_LIMIT = "rate_limit"
+    RATE_LIMIT = "rate_limited"
     AUTHORIZATION = "authorization"
     PROTOCOL = "protocol"
     QUALITY = "quality"

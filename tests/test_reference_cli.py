@@ -21,7 +21,9 @@ from market_sentinel.domain.security_data import (
     DailyBarBatch,
     DataCompleteness,
     ListStatus,
+    MarketDataErrorCategory,
     PriceUnit,
+    ProviderError,
     SecurityCategory,
     SecurityExchange,
     SecurityMasterBatch,
@@ -70,6 +72,52 @@ def write_watchlist(path: Path) -> None:
                         "market": "a_share",
                         "exchange": "SH",
                         "security_type": "index",
+                        "enabled": True,
+                        "roles": ["watch"],
+                        "priority": "normal",
+                    },
+                ],
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_stock_etf_watchlist(path: Path) -> None:
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "declared_count": 3,
+                "securities": [
+                    {
+                        "symbol": "600183.SH",
+                        "name": "上海示例股票",
+                        "market": "a_share",
+                        "exchange": "SH",
+                        "security_type": "stock",
+                        "enabled": True,
+                        "roles": ["watch"],
+                        "priority": "normal",
+                    },
+                    {
+                        "symbol": "000333.SZ",
+                        "name": "深圳示例股票",
+                        "market": "a_share",
+                        "exchange": "SZ",
+                        "security_type": "stock",
+                        "enabled": True,
+                        "roles": ["watch"],
+                        "priority": "normal",
+                    },
+                    {
+                        "symbol": "510300.SH",
+                        "name": "示例ETF",
+                        "market": "a_share",
+                        "exchange": "SH",
+                        "security_type": "etf",
                         "enabled": True,
                         "roles": ["watch"],
                         "priority": "normal",
@@ -169,6 +217,34 @@ class StubDailyBarProvider(DailyBarProvider):
         )
 
 
+class FailedDailyBarProvider(DailyBarProvider):
+    async def get_daily_bars(
+        self,
+        symbols: Sequence[str],
+        start_date: date,
+        end_date: date,
+    ) -> DailyBarBatch:
+        assert start_date == end_date
+        return DailyBarBatch(
+            requested_symbols=tuple(symbols),
+            bars=(),
+            unsupported_symbols=(
+                ("510300.SH",) if "510300.SH" in symbols else ()
+            ),
+            provider_errors=(
+                ProviderError(
+                    category=MarketDataErrorCategory.RATE_LIMIT,
+                    code="rate_limited",
+                    message="完整但不应出现在终端的限频错误",
+                ),
+            ),
+            completeness=DataCompleteness.FAILED,
+            source="tushare",
+            requested_at=FIXED_NOW,
+            completed_at=FIXED_NOW,
+        )
+
+
 def settings_for(path: Path) -> Settings:
     return Settings(
         _env_file=None,
@@ -204,11 +280,12 @@ def test_security_master_cli_outputs_summary_and_writes_normalized_batch(
     assert payload == {
         "status": "partial",
         "requested_count": 3,
+        "supported_count": 2,
         "returned_count": 2,
-        "missing_symbols": [],
-        "unsupported_symbols": ["510300.SH"],
-        "invalid_symbols": [],
-        "provider_errors": [],
+        "missing_count": 0,
+        "unsupported_count": 1,
+        "invalid_count": 0,
+        "provider_error_counts": {},
         "output_path": (output_dir / "security-master.json").as_posix(),
     }
     assert master.requested == ("000001.SH", "510300.SH", "600183.SH")
@@ -263,6 +340,7 @@ def test_daily_cli_can_select_only_stock_or_index(
     assert exit_code == 0
     assert payload["status"] == "complete"
     assert payload["requested_count"] == 1
+    assert payload["supported_count"] == 1
     assert payload["returned_count"] == 1
     assert daily.requested == (expected_symbol,)
     assert payload["output_path"] == (
@@ -315,13 +393,97 @@ def test_reference_cli_reports_missing_token_without_network_or_secret(
     payload = json.loads(output)
     assert exit_code == 2
     assert payload["status"] == "failed"
-    assert payload["provider_errors"] == [
-        {
-            "category": "authorization",
-            "code": "MarketDataAuthorizationError",
-            "message": "TUSHARE_TOKEN is required",
-            "symbol": None,
-        }
-    ]
+    assert payload["provider_error_counts"] == {"authorization": 1}
+    assert "provider_errors" not in payload
     assert TOKEN not in output
     assert payload["output_path"] is None
+
+
+def test_reference_cli_summarizes_provider_errors_without_printing_messages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    watchlist_path = tmp_path / "watchlist.yaml"
+    write_watchlist(watchlist_path)
+    output_dir = tmp_path / "data/reference/tushare"
+    monkeypatch.setattr(cli, "get_settings", lambda: settings_for(watchlist_path))
+    monkeypatch.setattr(
+        cli,
+        "build_tushare_reference_providers",
+        lambda settings, security_types: (
+            StubSecurityMasterProvider(),
+            FailedDailyBarProvider(),
+        ),
+    )
+    monkeypatch.setattr(cli, "REFERENCE_OUTPUT_DIR", output_dir)
+
+    exit_code = cli.main(
+        ["reference", "daily", "--date", "2026-07-24"]
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert exit_code == 2
+    assert payload["status"] == "failed"
+    assert payload["provider_error_counts"] == {"rate_limited": 1}
+    assert "provider_errors" not in payload
+    assert "完整但不应出现在终端的限频错误" not in output
+    report = json.loads(
+        (output_dir / "daily-2026-07-24.json").read_text(encoding="utf-8")
+    )
+    assert report["provider_errors"][0]["message"] == (
+        "完整但不应出现在终端的限频错误"
+    )
+
+
+@pytest.mark.parametrize(
+    ("command_args", "expected_calls"),
+    [
+        (
+            ["reference", "security-master"],
+            {"index_basic": 0, "stock_basic": 1},
+        ),
+        (
+            ["reference", "daily", "--date", "2026-07-24"],
+            {"daily": 1, "index_daily": 0},
+        ),
+    ],
+)
+def test_reference_dry_run_shows_one_batch_call_without_loading_settings(
+    command_args: list[str],
+    expected_calls: dict[str, int],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    watchlist_path = tmp_path / "watchlist.yaml"
+    write_stock_etf_watchlist(watchlist_path)
+
+    def fail_if_settings_are_loaded() -> Settings:
+        raise AssertionError("dry-run must not load Settings or credentials")
+
+    monkeypatch.setattr(cli, "get_settings", fail_if_settings_are_loaded)
+    exit_code = cli.main(
+        [
+            *command_args,
+            "--config",
+            str(watchlist_path),
+            "--dry-run",
+        ]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload == {
+        "status": "dry_run",
+        "requested_count": 3,
+        "supported_count": 2,
+        "stock_count": 2,
+        "etf_count": 1,
+        "index_count": 0,
+        "unsupported_count": 1,
+        "planned_calls": expected_calls,
+        "total_planned_calls": 1,
+    }
+    assert TOKEN not in json.dumps(payload)
