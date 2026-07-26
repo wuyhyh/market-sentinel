@@ -16,6 +16,7 @@ from market_sentinel.domain.security_data import (
     DataCompleteness,
     ListStatus,
     MarketDataErrorCategory,
+    PriceUnit,
     ProviderError,
     SecurityCategory,
     SecurityExchange,
@@ -65,6 +66,7 @@ def daily_bar_data(
         "high": Decimal("56.30"),
         "low": Decimal("54.90"),
         "close": Decimal("56.00"),
+        "price_unit": PriceUnit.CNY_PER_SECURITY,
         "volume": 123_400,
         "turnover": Decimal("6853200.50"),
         "volume_unit": VolumeUnit.SHARE,
@@ -173,11 +175,15 @@ def test_daily_bar_rejects_invalid_trade_date() -> None:
 
 def test_index_daily_bar_uses_the_same_provider_independent_daily_model() -> None:
     bar = DailyBar.model_validate(
-        daily_bar_data(symbol="000001.SH"),
+        {
+            **daily_bar_data(symbol="000001.SH"),
+            "price_unit": PriceUnit.INDEX_POINT,
+        },
     )
 
     assert bar.symbol == "000001.SH"
     assert bar.trade_date == date(2026, 7, 24)
+    assert bar.price_unit is PriceUnit.INDEX_POINT
     assert "source_time" not in DailyBar.model_fields
 
 

@@ -17,11 +17,13 @@ dependencies = [
   "pydantic>=2.10",
   "pydantic-settings>=2.7",
   "pyyaml>=6.0",
-  "tushare==1.4.29",
   "uvicorn[standard]>=0.34",
 ]
 
 [project.optional-dependencies]
+tushare = [
+  "tushare>=1.4.29,<2",
+]
 dev = [
   "mypy>=1.15",
   "pytest>=8.3",

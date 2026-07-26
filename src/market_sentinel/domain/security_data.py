@@ -49,6 +49,11 @@ class VolumeUnit(StrEnum):
     LOT = "lot"
 
 
+class PriceUnit(StrEnum):
+    CNY_PER_SECURITY = "CNY_per_security"
+    INDEX_POINT = "index_point"
+
+
 class TurnoverUnit(StrEnum):
     CNY = "CNY"
     CNY_THOUSAND = "CNY_thousand"
@@ -151,6 +156,7 @@ class DailyBar(BaseModel):
     high: PositivePrice
     low: PositivePrice
     close: PositivePrice
+    price_unit: PriceUnit
     volume: Annotated[int, Field(ge=0)]
     turnover: NonNegativeTurnover
     volume_unit: VolumeUnit

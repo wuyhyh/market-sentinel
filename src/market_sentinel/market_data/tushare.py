@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from pydantic import SecretStr, ValidationError
 
@@ -21,6 +21,7 @@ from market_sentinel.domain.security_data import (
     DataCompleteness,
     ListStatus,
     MarketDataErrorCategory,
+    PriceUnit,
     ProviderError,
     SecurityCategory,
     SecurityExchange,
@@ -39,7 +40,7 @@ from market_sentinel.market_data.errors import (
 )
 from market_sentinel.market_data.reference import DailyBarProvider, SecurityMasterProvider
 
-TUSHARE_SOURCE = "tushare_pro"
+TUSHARE_SOURCE = "tushare"
 _STOCK_BASIC_FIELDS = (
     "ts_code,symbol,name,market,exchange,curr_type,list_status,list_date"
 )
@@ -47,8 +48,9 @@ _INDEX_BASIC_FIELDS = (
     "ts_code,name,fullname,market,publisher,index_type,category,list_date"
 )
 _DAILY_FIELDS = "ts_code,trade_date,open,high,low,close,pre_close,vol,amount"
-_LOT_SIZE = Decimal(100)
-_THOUSAND = Decimal(1000)
+_SHARES_PER_LOT = Decimal(100)
+_CNY_PER_THOUSAND_CNY = Decimal(1000)
+_CANONICAL_SYMBOL_PATTERN = re.compile(r"^\d{6}\.(SH|SZ)$")
 
 _PHONE_PATTERN = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 _EMAIL_PATTERN = re.compile(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
@@ -56,6 +58,12 @@ _LABELED_SECRET_PATTERN = re.compile(
     r"(?i)\b(token|api[_ -]?key|authorization|cookie|password)\b"
     r"(\s*[:=]\s*|\s+)([^\s,;]+)"
 )
+_LABELED_ACCOUNT_PATTERN = re.compile(
+    r"(?i)(?<!\w)(account(?:[_ -]?(?:id|name))?|"
+    r"user(?:[_ -]?(?:id|name))?|账号|账户|用户(?:id)?)"
+    r"(\s*[:=：]\s*|\s+)([^\s,;]+)"
+)
+_BEARER_PATTERN = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _LONG_CREDENTIAL_PATTERN = re.compile(
     r"(?<![A-Za-z0-9])[A-Za-z0-9_-]{20,}(?![A-Za-z0-9])"
 )
@@ -69,10 +77,22 @@ class _ResponseQualityError(ValueError):
     pass
 
 
+class TushareReferenceClient(Protocol):
+    """Minimal SDK surface used by the reference-data adapters."""
+
+    def stock_basic(self, **kwargs: str) -> object: ...
+
+    def index_basic(self, **kwargs: str) -> object: ...
+
+    def daily(self, **kwargs: str) -> object: ...
+
+    def index_daily(self, **kwargs: str) -> object: ...
+
+
 class _TushareReferenceProvider:
     def __init__(
         self,
-        client: object,
+        client: TushareReferenceClient,
         security_types: Mapping[str, SecurityCategory],
         *,
         token: SecretStr | None = None,
@@ -84,7 +104,14 @@ class _TushareReferenceProvider:
         self._now = now
 
     def _requested_symbols(self, symbols: Sequence[str]) -> tuple[str, ...]:
-        requested = tuple(sorted(set(symbols)))
+        supplied = tuple(symbols)
+        if len(supplied) != len(set(supplied)):
+            raise MarketDataQualityError("requested symbols must not contain duplicates")
+        if any(_CANONICAL_SYMBOL_PATTERN.fullmatch(symbol) is None for symbol in supplied):
+            raise MarketDataQualityError(
+                "requested symbols must use canonical NNNNNN.SH or NNNNNN.SZ form"
+            )
+        requested = tuple(sorted(supplied))
         if not requested:
             raise MarketDataQualityError("at least one canonical symbol is required")
         return requested
@@ -281,6 +308,7 @@ class TushareDailyBarProvider(
                     start_date=start_date,
                     end_date=end_date,
                     received_at=self._now(),
+                    security_type=security_type,
                 )
             except _ResponseProtocolError as error:
                 invalid.append(symbol)
@@ -340,7 +368,7 @@ def build_tushare_reference_providers(
     try:
         tushare_module = module_loader("tushare")
         pro_api = cast(Callable[[str], object], cast(Any, tushare_module).pro_api)
-        client = pro_api(token.get_secret_value())
+        client = cast(TushareReferenceClient, pro_api(token.get_secret_value()))
     except Exception as error:  # noqa: BLE001 - SDK startup errors must be sanitized
         safe_message = _sanitize_error(error, token)
         category, _ = _classify_error(error)
@@ -384,12 +412,16 @@ def _convert_security_master_row(
     security_type: SecurityCategory,
     received_at: datetime,
 ) -> SecurityMasterRecord:
-    matching = [row for row in rows if _required_text(row, "ts_code") == requested_symbol]
-    if len(matching) != 1:
+    response_symbols = [_required_text(row, "ts_code") for row in rows]
+    if any(symbol != requested_symbol for symbol in response_symbols):
+        raise _ResponseProtocolError(
+            "security master response contains an unrequested symbol"
+        )
+    if len(rows) != 1:
         raise _ResponseProtocolError(
             "security master response must contain exactly one requested symbol row"
         )
-    row = matching[0]
+    row = rows[0]
     name = _required_text(row, "name")
     list_date = _optional_date(row.get("list_date"))
     exchange = _exchange_from_symbol(requested_symbol)
@@ -433,6 +465,7 @@ def _convert_daily_rows(
     start_date: date,
     end_date: date,
     received_at: datetime,
+    security_type: SecurityCategory,
 ) -> tuple[DailyBar, ...]:
     bars: list[DailyBar] = []
     seen_dates: set[date] = set()
@@ -457,8 +490,13 @@ def _convert_daily_rows(
                 high=_required_decimal(row, "high"),
                 low=_required_decimal(row, "low"),
                 close=_required_decimal(row, "close"),
+                price_unit=(
+                    PriceUnit.CNY_PER_SECURITY
+                    if security_type is SecurityCategory.STOCK
+                    else PriceUnit.INDEX_POINT
+                ),
                 volume=_lots_to_shares(_required_decimal(row, "vol")),
-                turnover=_required_decimal(row, "amount") * _THOUSAND,
+                turnover=_required_decimal(row, "amount") * _CNY_PER_THOUSAND_CNY,
                 volume_unit=VolumeUnit.SHARE,
                 turnover_unit=TurnoverUnit.CNY,
                 adjustment=AdjustmentMode.NONE,
@@ -513,7 +551,7 @@ def _parse_yyyymmdd(value: str) -> date:
 
 
 def _lots_to_shares(lots: Decimal) -> int:
-    shares = lots * _LOT_SIZE
+    shares = lots * _SHARES_PER_LOT
     if shares < 0:
         raise _ResponseQualityError("volume must not be negative")
     if shares != shares.to_integral_value():
@@ -605,6 +643,8 @@ def _classify_error(
 
     if isinstance(error, TimeoutError) or "timeout" in text or "timed out" in text:
         return MarketDataErrorCategory.TIMEOUT, "timeout"
+    if isinstance(error, AttributeError):
+        return MarketDataErrorCategory.PROTOCOL, "protocol_error"
     if any(marker in text for marker in authentication_markers):
         return MarketDataErrorCategory.AUTHORIZATION, "authentication_failed"
     if ("没有接口" in text and "访问权限" in text) or any(
@@ -623,6 +663,8 @@ def _sanitize_error(error: BaseException, token: SecretStr | None) -> str:
         if secret:
             message = message.replace(secret, "[redacted-secret]")
     message = _LABELED_SECRET_PATTERN.sub(r"\1=[redacted-secret]", message)
+    message = _LABELED_ACCOUNT_PATTERN.sub(r"\1=[redacted-account]", message)
+    message = _BEARER_PATTERN.sub("Bearer [redacted-secret]", message)
     message = _PHONE_PATTERN.sub("[redacted-phone]", message)
     message = _EMAIL_PATTERN.sub("[redacted-email]", message)
     message = _LONG_CREDENTIAL_PATTERN.sub("[redacted-secret]", message)
