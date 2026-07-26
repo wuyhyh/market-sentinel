@@ -1,0 +1,24 @@
+schema_version: 1
+declared_count: 2
+
+securities:
+  - symbol: "600000.SH"
+    name: "示例沪市股票"
+    market: "a_share"
+    exchange: "SH"
+    security_type: "stock"
+    enabled: true
+    roles:
+      - "watch"
+    priority: "normal"
+
+  - symbol: "159001.SZ"
+    name: "示例深市ETF"
+    market: "a_share"
+    exchange: "SZ"
+    security_type: "etf"
+    enabled: true
+    roles:
+      - "watch"
+    priority: "normal"
+    notes: "仅演示配置结构，不代表真实观察清单"

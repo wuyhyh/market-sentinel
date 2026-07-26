@@ -8,6 +8,7 @@ __pycache__/
 data/
 dist/
 build/
+/config/watchlist.yaml
 
 # JetBrains IDE
 .idea/

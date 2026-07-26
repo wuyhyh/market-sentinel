@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     notify_webhook_url: str | None = None
     portfolio_config_path: Path = Path("config/portfolio.example.yaml")
+    watchlist_config_path: Path = Path("config/watchlist.yaml")
     enable_scheduler: bool = True
 
 

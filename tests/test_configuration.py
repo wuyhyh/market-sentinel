@@ -102,6 +102,18 @@ def test_default_settings_use_mock_analyst() -> None:
     assert isinstance(build_analyst(settings), MockAnalyst)
 
 
+def test_watchlist_path_can_be_set_by_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    watchlist_path = tmp_path / "watchlist.yaml"
+    monkeypatch.setenv("WATCHLIST_CONFIG_PATH", str(watchlist_path))
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert settings.watchlist_config_path == watchlist_path
+
+
 @pytest.mark.parametrize(
     ("provider", "expected_error"),
     [
