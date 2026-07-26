@@ -2,11 +2,13 @@
 
 ## 1. 当前阶段
 
-**阶段 1：真实交易日历基线**
+**阶段 2：A 股参考数据基线与真实行情数据源验证**
 
 阶段 0 的 Mock MVP 稳定化已经完成。阶段 1 已建立真实交易日历基线：production 使用经过固定官方日期交叉验证的交易所日历判断任务是否执行，development/test 仍可使用开发日历。
 
-这一基线只解决交易日识别，不代表系统已经具备实时行情采集、真实新闻与公告采集或真实投研能力。当前完整报告链中的行情、分析和默认通知仍以 Mock 或开发实现为主。
+阶段 2 当前已完成供应商无关的参考数据领域模型、经过校验的 A 股 watchlist、Tushare 参考数据适配器和手工 reference CLI。股票日线已完成一次真实数据验证；证券基础信息尚未完成真实成功返回验收。
+
+参考数据只包括证券基础信息和日线，不是实时行情。当前完整报告链中的行情、分析和默认通知仍以 Mock 或开发实现为主，系统尚不具备实时行情采集、真实新闻与公告采集或真实投研能力。
 
 ## 2. 已实现功能
 
@@ -27,6 +29,20 @@
 - Mock 交易日完成路径和非交易日跳过路径验收测试。
 - 配置安全边界测试，包括环境限制、默认 Mock、付费模型缺少密钥、SecretStr 脱敏和无效组合配置路径。
 - 统一的 `make verify` 本地验证命令。
+- 供应商无关的参考数据领域模型：
+  - `SecurityMasterRecord` / `SecurityMasterBatch`；
+  - `DailyBar` / `DailyBarBatch`；
+  - `SecurityMasterProvider` / `DailyBarProvider` 异步抽象接口。
+- Tushare 参考数据适配器：
+  - `TushareSecurityMasterProvider`，股票使用 `stock_basic`，指数预留独立的 `index_basic` 批量路径；
+  - `TushareDailyBarProvider`，单日股票数据使用 `daily`，指数预留独立的 `index_daily` 批量路径；
+  - ETF 在免费账户范围内明确标记为 `unsupported`，不会调用无权限的基金接口；
+  - 股票基础信息和指定日期日线均采用单次批量请求、适配器内本地过滤，不逐证券请求。
+- reference CLI：
+  - `market-sentinel reference security-master`；
+  - `market-sentinel reference daily --date YYYY-MM-DD`；
+  - 两个命令均支持 `--dry-run` 查看无网络调用计划。
+- 经过校验的本地 A 股 watchlist 当前共 93 个标的：79 只股票、14 只 ETF。
 
 当前代码中还存在 OpenAI 和 DeepSeek 适配器，但本阶段没有使用真实 API 对其进行日常运行验证。
 
@@ -143,6 +159,22 @@ make verify
 
 该命令依次运行 pytest、Ruff、Mypy 和 Python compileall；任一步失败都会使 Make 立即返回失败。
 
+### Tushare 参考数据
+
+查看证券基础信息调用计划，不读取 Token、不访问网络：
+
+```bash
+market-sentinel reference security-master --dry-run
+```
+
+查看指定日期日线调用计划：
+
+```bash
+market-sentinel reference daily --date 2026-07-24 --dry-run
+```
+
+手工执行真实请求时，CLI 只输出稳定的 JSON 摘要；完整且经过清洗的批次报告写入 Git 已忽略的 `data/reference/tushare/`。参考数据 CLI 不接入 scheduler、`ReportService`、LLM 或通知链。
+
 ## 6. 配置与安全边界
 
 - 默认 `LLM_PROVIDER` 是 `mock`，默认执行不会选择付费模型。
@@ -155,6 +187,7 @@ make verify
 - OpenAI Key 通过环境变量 `OPENAI_API_KEY` 提供；选择 OpenAI 但缺少 Key 时明确失败。
 - DeepSeek Key 通过环境变量 `DEEPSEEK_API_KEY` 提供；选择 DeepSeek 但缺少 Key 时明确失败。
 - API Key 在 Settings 中使用 `SecretStr`，常规字符串、repr 和 JSON 输出会脱敏。
+- Tushare Token 通过环境变量提供并使用 `SecretStr`；Token、账户信息和凭证不会写入参考数据报告或终端摘要。
 - 本地 `.env` 文件由 `.gitignore` 排除，不进入 Git；`.env.example` 只保留空 Key 和安全开发默认值。
 - 当前组合配置来自本地 YAML 示例，不连接券商账户。
 - 当前项目没有券商接口、自动下单函数或账户控制能力。
@@ -163,10 +196,49 @@ make verify
 
 - 验证日期：2026-07-26（Asia/Shanghai）
 - 执行命令：`make verify`
-- pytest：123 passed
+- pytest：240 passed
 - Ruff：All checks passed
-- Mypy：Success，37 个源文件未发现问题
+- Mypy：Success，52 个源文件未发现问题
 - compileall：成功，无错误输出
+
+### 参考数据 watchlist
+
+- 总数：93；
+- 股票：79；
+- ETF：14；
+- 当前没有指数，因此 reference CLI 的真实调用计划不会调用 `index_basic` 或 `index_daily`。
+
+### `daily` 真实数据验证
+
+指定交易日期 `2026-07-24` 的真实验证结果：
+
+```text
+requested_count=93
+supported_count=79
+returned_count=79
+missing_count=0
+unsupported_count=14
+provider_errors=0
+status=partial
+```
+
+`partial` 的唯一原因是免费账户不支持 14 只 ETF 的日线数据，不是程序运行故障。79 只受支持股票全部返回，没有缺失证券或 Provider 错误。日线只表示交易日期，不作为盘中 `source_time`，也不作为实时行情使用。
+
+### `security-master` 验证状态
+
+已经完成：
+
+- 完全离线的 fake client 测试；
+- 当前 93 个标的的 `--dry-run`；
+- 79 只股票最多一次 `stock_basic`、14 只 ETF 不发起请求的批量策略验证；
+- `rate_limited` 错误分类、去重和控制字符清洗验证；
+- 无指数时不调用 `index_basic` 的调用预算验证。
+
+尚未完成：
+
+- `security-master` 的真实成功返回验收。
+
+此前的逐证券实验耗尽了当前 `stock_basic` 接口额度，后续批量请求因此收到外部限频。该状态是供应商账户额度限制，不是当前批量实现的代码缺陷，也不能据此声明 `security-master` 已完成真实数据验收。额度恢复后只需手工执行一次 refresh，确认单次 `stock_basic` 批量调用能够成功返回并通过本地过滤。
 
 ## 8. 已知问题
 
@@ -191,6 +263,7 @@ make verify
 ### 后续阶段处理
 
 - 实时行情数据尚未接入，当前仍使用 `MockMarketDataProvider`。
+- `security-master` 尚待额度恢复后执行一次真实 refresh 验收；当前只确认了离线测试、dry-run、批量调用策略和错误处理。
 - 官方公告和新闻数据尚未接入。
 - 真实通知渠道尚未确定。
 - PostgreSQL 尚未用于业务数据持久化。
@@ -217,8 +290,8 @@ make verify
 - 对外荐股服务；
 - 未经人工确认的交易决策。
 
-## 10. 下一阶段唯一目标
+## 10. 下一项唯一目标
 
-**阶段 2：调研、设计并接入有授权、可验证、带来源和数据时间的实时行情数据源。**
+**额度恢复后，对 `security-master` 执行一次手工 refresh，完成真实成功返回验收。**
 
-本阶段只处理实时行情，不同时展开持仓导入、新闻、数据库或真实 LLM 日常运行。
+这是一项参考数据验收收尾工作，不扩大到 scheduler、`ReportService`、实时行情、新闻、数据库或真实 LLM 日常运行。完成后再继续阶段 2 的实时行情数据源验证。
