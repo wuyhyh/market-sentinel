@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     tushare_token: SecretStr | None = None
     security_master_max_age_days: int = Field(default=7, gt=0)
 
+    opend_host: str = "127.0.0.1"
+    opend_port: int = Field(default=11111, ge=1, le=65535)
+    opend_connect_timeout_seconds: float = Field(default=2.0, gt=0, le=2.0)
+
     notify_webhook_url: str | None = None
     portfolio_config_path: Path = Path("config/portfolio.example.yaml")
     watchlist_config_path: Path = Path("config/watchlist.yaml")

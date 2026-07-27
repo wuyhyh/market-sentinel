@@ -67,12 +67,18 @@ class AdjustmentMode(StrEnum):
 
 class MarketDataErrorCategory(StrEnum):
     PROVIDER = "provider_error"
+    OPEND_UNAVAILABLE = "opend_unavailable"
+    CONNECTION_REFUSED = "connection_refused"
+    AUTHENTICATION_FAILED = "authentication_failed"
+    PERMISSION_DENIED = "permission_denied"
     TIMEOUT = "timeout"
     RATE_LIMIT = "rate_limited"
     AUTHORIZATION = "authorization"
+    INVALID_RESPONSE = "invalid_response"
     PROTOCOL = "protocol"
     QUALITY = "quality"
     UNSUPPORTED = "unsupported"
+    UNEXPECTED = "unexpected_error"
 
 
 class ProviderError(BaseModel):

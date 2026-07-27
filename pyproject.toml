@@ -24,6 +24,9 @@ dependencies = [
 tushare = [
   "tushare>=1.4.29,<2",
 ]
+opend = [
+  "futu-api>=10.9.6908,<11",
+]
 dev = [
   "mypy>=1.15",
   "pytest>=8.3",
