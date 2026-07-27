@@ -33,6 +33,7 @@ from market_sentinel.market_data import (
     SecurityMasterCacheError,
     build_tushare_reference_providers,
 )
+from market_sentinel.market_data.shadow import run_market_data_shadow_command
 from market_sentinel.watchlist import WatchlistConfigurationError, WatchlistLoader
 
 REFERENCE_OUTPUT_DIR = Path("data/reference/tushare")
@@ -100,6 +101,45 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Trading date in YYYY-MM-DD format",
     )
 
+    market_data = subparsers.add_parser(
+        "market-data",
+        help="Run an isolated market-data shadow snapshot",
+    )
+    market_data_commands = market_data.add_subparsers(
+        dest="market_data_command",
+        required=True,
+    )
+    snapshot = market_data_commands.add_parser(
+        "snapshot",
+        help="Validate a Mock or OpenD quote batch without generating a report",
+    )
+    snapshot.add_argument(
+        "--provider",
+        metavar="PROVIDER",
+        help="Quote provider; defaults to MARKET_DATA_PROVIDER (mock by default)",
+    )
+    snapshot.add_argument(
+        "--config",
+        type=Path,
+        help="Override WATCHLIST_CONFIG_PATH for this command",
+    )
+    snapshot.add_argument(
+        "--phase",
+        choices=(
+            MarketPhase.A_SHARE_CALL_AUCTION.value,
+            MarketPhase.A_SHARE_OPEN_PRICE.value,
+            MarketPhase.A_SHARE_MIDDAY.value,
+            MarketPhase.A_SHARE_CLOSE.value,
+        ),
+        default=MarketPhase.A_SHARE_MIDDAY.value,
+        help="A-share phase attached to the snapshot",
+    )
+    snapshot.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate the watchlist and show the call plan without loading a provider",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -118,6 +158,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "reference":
         return asyncio.run(_run_reference_command(args))
+
+    if args.command == "market-data":
+        return asyncio.run(run_market_data_shadow_command(args))
 
     raise RuntimeError(f"Unsupported command: {args.command}")
 

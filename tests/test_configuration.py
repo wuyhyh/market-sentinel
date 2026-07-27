@@ -102,6 +102,15 @@ def test_default_settings_use_mock_analyst() -> None:
     assert isinstance(build_analyst(settings), MockAnalyst)
 
 
+def test_default_settings_use_offline_mock_market_data() -> None:
+    assert make_settings().market_data_provider == "mock"
+
+
+def test_unknown_market_data_provider_is_rejected_by_configuration() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(market_data_provider="unknown")
+
+
 def test_watchlist_path_can_be_set_by_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

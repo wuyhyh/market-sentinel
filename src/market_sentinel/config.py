@@ -19,6 +19,7 @@ class Settings(BaseSettings):
 
     llm_provider: Literal["openai", "deepseek", "mock"] = "mock"
     trading_calendar: Literal["weekday", "exchange"] = "weekday"
+    market_data_provider: Literal["mock", "opend"] = "mock"
 
     openai_api_key: SecretStr | None = None
     openai_model: str = "gpt-5.6"

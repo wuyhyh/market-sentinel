@@ -147,11 +147,16 @@ class QuoteBatch(BaseModel):
     critical_missing_symbols: tuple[CanonicalSymbol, ...] = ()
     provider_errors: tuple[ProviderError, ...] = ()
     quality_issues: tuple[QualityIssue, ...] = ()
+    returned_count: Annotated[int, Field(ge=0)]
+    snapshot_calls: Annotated[int, Field(ge=0)] = 0
+    market_state_calls: Annotated[int, Field(ge=0)] = 0
+    network_calls: Annotated[int, Field(ge=0)] = 0
     completeness: DataCompleteness
     coverage_ratio: Annotated[Decimal, Field(ge=0, le=1)]
     source: Annotated[str, Field(min_length=1)]
     market_phase: MarketPhase
     market_state: QuoteMarketState
+    raw_market_states: tuple[str, ...] = ()
     freshness: QuoteFreshness
     requested_at: datetime
     completed_at: datetime
@@ -209,6 +214,13 @@ class QuoteBatch(BaseModel):
             )
         )
 
+    @field_validator("raw_market_states")
+    @classmethod
+    def sort_raw_market_states(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not state.strip() for state in value):
+            raise ValueError("raw market states must not be blank")
+        return tuple(sorted(value))
+
     @field_validator("requested_at", "completed_at")
     @classmethod
     def require_aware_timestamp(cls, value: datetime) -> datetime:
@@ -246,6 +258,8 @@ class QuoteBatch(BaseModel):
             raise ValueError("quote source must match batch source")
         if any(quote.market_phase is not self.market_phase for quote in self.quotes):
             raise ValueError("quote market phase must match batch phase")
+        if self.network_calls < self.snapshot_calls + self.market_state_calls:
+            raise ValueError("network_calls must cover quote endpoint calls")
 
         has_issues = bool(
             self.missing_symbols

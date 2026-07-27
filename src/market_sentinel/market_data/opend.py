@@ -239,6 +239,8 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
         snapshot_rows: tuple[dict[str, object], ...] | None = None
         received_at: datetime | None = None
         errors: list[ProviderError] = []
+        snapshot_calls = 0
+        market_state_calls = 0
         provider_symbols = tuple(internal_to_opend_symbol(symbol) for symbol in requested)
         try:
             client = self._client_factory(self._host, self._port)
@@ -247,6 +249,7 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
         if client is not None:
             try:
                 try:
+                    market_state_calls += 1
                     state_rows = client.get_market_state(provider_symbols)
                 except Exception as error:  # noqa: BLE001 - SDK errors are not stable.
                     errors.append(
@@ -255,6 +258,7 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
                         )
                     )
                 try:
+                    snapshot_calls += 1
                     snapshot_rows = client.get_market_snapshot(provider_symbols)
                 except Exception as error:  # noqa: BLE001 - SDK errors are not stable.
                     errors.append(
@@ -278,6 +282,10 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
                 requested_symbols=requested,
                 quotes=(),
                 provider_errors=_deduplicate_errors(errors),
+                returned_count=0,
+                snapshot_calls=snapshot_calls,
+                market_state_calls=market_state_calls,
+                network_calls=snapshot_calls + market_state_calls,
                 completeness=DataCompleteness.FAILED,
                 coverage_ratio=Decimal(0),
                 source=OPEND_SOURCE,
@@ -300,6 +308,8 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
             state_rows=state_rows,
             snapshot_rows=snapshot_rows,
             errors=errors,
+            snapshot_calls=snapshot_calls,
+            market_state_calls=market_state_calls,
         )
 
     def _build_batch(
@@ -312,11 +322,13 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
         state_rows: Sequence[Mapping[str, object]],
         snapshot_rows: Sequence[Mapping[str, object]],
         errors: list[ProviderError],
+        snapshot_calls: int,
+        market_state_calls: int,
     ) -> QuoteBatch:
         requested_provider = {
             internal_to_opend_symbol(symbol): symbol for symbol in requested
         }
-        market_states = _market_states_by_provider_symbol(
+        market_states, raw_market_states = _market_states_by_provider_symbol(
             state_rows,
             requested_provider_symbols=set(requested_provider),
         )
@@ -451,11 +463,21 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
             critical_missing_symbols=tuple(critical_missing),
             provider_errors=_deduplicate_errors(errors),
             quality_issues=tuple(issues),
+            returned_count=sum(
+                provider_symbol in requested_provider
+                for provider_symbol in (
+                    str(row.get("code", "")).strip() for row in snapshot_rows
+                )
+            ),
+            snapshot_calls=snapshot_calls,
+            market_state_calls=market_state_calls,
+            network_calls=snapshot_calls + market_state_calls,
             completeness=completeness,
             coverage_ratio=Decimal(len(quotes)) / Decimal(len(requested)),
             source=OPEND_SOURCE,
             market_phase=phase,
             market_state=batch_market_state,
+            raw_market_states=tuple(raw_market_states.values()),
             freshness=freshness,
             requested_at=requested_at,
             completed_at=completed_at,
@@ -472,6 +494,7 @@ class OpenDMarketDataProvider(QuoteMarketDataProvider):
             requested_symbols=requested,
             quotes=(),
             provider_errors=(_provider_error(error),),
+            returned_count=0,
             completeness=DataCompleteness.FAILED,
             coverage_ratio=Decimal(0),
             source=OPEND_SOURCE,
@@ -710,29 +733,57 @@ def _market_states_by_provider_symbol(
     rows: Sequence[Mapping[str, object]],
     *,
     requested_provider_symbols: set[str],
-) -> dict[str, QuoteMarketState]:
+) -> tuple[dict[str, QuoteMarketState], dict[str, str]]:
     states: dict[str, QuoteMarketState] = {}
+    raw_states: dict[str, str] = {}
     for row in rows:
         provider_symbol = str(row.get("code", "")).strip()
         if provider_symbol not in requested_provider_symbols:
             continue
-        states.setdefault(provider_symbol, _map_market_state(row.get("market_state")))
-    return dict(sorted(states.items()))
+        raw_state = sanitize_opend_market_state(row.get("market_state"))
+        states.setdefault(provider_symbol, _map_market_state(raw_state))
+        if raw_state:
+            raw_states.setdefault(provider_symbol, raw_state)
+    return dict(sorted(states.items())), dict(sorted(raw_states.items()))
 
 
 def _map_market_state(value: object) -> QuoteMarketState:
-    text = str(value or "").strip().upper()
-    if "." in text:
-        text = text.rsplit(".", 1)[-1]
+    text = sanitize_opend_market_state(value)
     if text in {"MORNING", "AFTERNOON"}:
         return QuoteMarketState.CONTINUOUS_TRADING
-    if text in {"PRE_MARKET_BEGIN", "AUCTION", "OPENING"}:
+    if text in {
+        "PRE_MARKET_BEGIN",
+        "PRE_MARKET_END",
+        "AUCTION",
+        "OPENING",
+        "WAITING_OPEN",
+    }:
         return QuoteMarketState.AUCTION
     if text in {"REST", "MIDDAY_BREAK"}:
         return QuoteMarketState.MIDDAY_BREAK
-    if text in {"CLOSED", "AFTER_HOURS_BEGIN", "AFTER_HOURS_END"}:
+    if text in {
+        "CLOSED",
+        "AFTER_HOURS_BEGIN",
+        "AFTER_HOURS_END",
+        "STIB_AFTER_HOURS_BEGIN",
+        "STIB_AFTER_HOURS_END",
+    }:
         return QuoteMarketState.CLOSED
     return QuoteMarketState.UNKNOWN
+
+
+def sanitize_opend_market_state(value: object) -> str:
+    text = "".join(
+        character
+        for character in str(value or "")
+        if not unicodedata.category(character).startswith("C")
+    )
+    text = " ".join(text.split()).upper()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    if re.fullmatch(r"[A-Z][A-Z0-9_]*", text):
+        return text
+    return sanitize_opend_error(text).upper()
 
 
 def _aggregate_market_state(

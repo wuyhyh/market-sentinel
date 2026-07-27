@@ -199,12 +199,13 @@ def build_provider(
     security_types: Mapping[str, SecurityCategory],
     *,
     endpoint_checker: Callable[[str, int, float], None] | None = None,
+    now: Callable[[], datetime] = lambda: FIXED_NOW,
 ) -> OpenDMarketDataProvider:
     return OpenDMarketDataProvider(
         security_types,
         client_factory=lambda host, port: client,
         endpoint_checker=endpoint_checker or (lambda host, port, timeout: None),
-        now=lambda: FIXED_NOW,
+        now=now,
     )
 
 
@@ -245,6 +246,10 @@ async def test_all_93_symbols_use_one_snapshot_and_one_state_call() -> None:
     assert client.close_calls == 1
     assert batch.completeness is DataCompleteness.COMPLETE
     assert len(batch.quotes) == 93
+    assert batch.returned_count == 93
+    assert batch.snapshot_calls == 1
+    assert batch.market_state_calls == 1
+    assert batch.network_calls == 2
     assert tuple(quote.symbol for quote in batch.quotes) == symbols
 
 
@@ -446,6 +451,36 @@ async def test_suspended_quote_is_usable_with_warning() -> None:
             TradingStatus.TRADING,
         ),
         (
+            "AFTER_HOURS_BEGIN",
+            QuoteMarketState.CLOSED,
+            QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING,
+            TradingStatus.CLOSED,
+        ),
+        (
+            "AFTER_HOURS_END",
+            QuoteMarketState.CLOSED,
+            QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING,
+            TradingStatus.CLOSED,
+        ),
+        (
+            "STIB_AFTER_HOURS_BEGIN",
+            QuoteMarketState.CLOSED,
+            QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING,
+            TradingStatus.CLOSED,
+        ),
+        (
+            "MarketState.STIB_AFTER_HOURS_END",
+            QuoteMarketState.CLOSED,
+            QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING,
+            TradingStatus.CLOSED,
+        ),
+        (
+            "PRE_MARKET_BEGIN",
+            QuoteMarketState.AUCTION,
+            QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING,
+            TradingStatus.AUCTION,
+        ),
+        (
             "UNRECOGNIZED",
             QuoteMarketState.UNKNOWN,
             QuoteFreshness.UNKNOWN_MARKET_STATE,
@@ -469,6 +504,32 @@ async def test_market_state_does_not_claim_unverified_live_freshness(
     assert batch.market_state is expected_state
     assert batch.freshness is expected_freshness
     assert batch.quotes[0].trading_status is expected_status
+
+
+async def test_closed_snapshot_with_large_delay_remains_complete() -> None:
+    symbol = "600183.SH"
+    received_at = datetime(2026, 7, 27, 15, 21, tzinfo=UTC)
+    batch = await build_provider(
+        FakeClient(
+            (symbol,),
+            state="MarketState.STIB_AFTER_HOURS_END\x00",
+            snapshots=[
+                snapshot_row(
+                    symbol,
+                    update_time="2026-07-27 15:00:00",
+                )
+            ],
+        ),
+        {symbol: SecurityCategory.STOCK},
+        now=lambda: received_at,
+    ).get_quotes((symbol,), PHASE)
+
+    assert batch.completeness is DataCompleteness.COMPLETE
+    assert batch.invalid_symbols == ()
+    assert batch.market_state is QuoteMarketState.CLOSED
+    assert batch.freshness is QuoteFreshness.OUTSIDE_CONTINUOUS_TRADING
+    assert batch.quotes[0].delay_seconds > Decimal(30000)
+    assert batch.raw_market_states == ("STIB_AFTER_HOURS_END",)
 
 
 @pytest.mark.parametrize(
