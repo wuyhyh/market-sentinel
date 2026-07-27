@@ -263,6 +263,7 @@ def build_shadow_report(
         "provider": provider_name,
         "requested_at": batch.requested_at.isoformat(),
         "completed_at": batch.completed_at.isoformat(),
+        "market_phase": batch.market_phase.value,
         "market_state": batch.market_state.value,
         "raw_market_state": dict(
             sorted(

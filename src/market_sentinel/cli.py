@@ -33,6 +33,7 @@ from market_sentinel.market_data import (
     SecurityMasterCacheError,
     build_tushare_reference_providers,
 )
+from market_sentinel.market_data.replay import run_market_data_replay_command
 from market_sentinel.market_data.shadow import run_market_data_shadow_command
 from market_sentinel.watchlist import WatchlistConfigurationError, WatchlistLoader
 
@@ -139,6 +140,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Validate the watchlist and show the call plan without loading a provider",
     )
+    replay = market_data_commands.add_parser(
+        "replay",
+        help="Replay a validated market-data snapshot without network access",
+    )
+    replay.add_argument(
+        "--input",
+        required=True,
+        type=Path,
+        help="Shadow snapshot JSON file to replay",
+    )
+    replay.add_argument(
+        "--config",
+        type=Path,
+        help="Override WATCHLIST_CONFIG_PATH for this command",
+    )
+    replay.add_argument(
+        "--write-report",
+        action="store_true",
+        help="Atomically write a full replay report under data/market-data/replays",
+    )
 
     return parser.parse_args(argv)
 
@@ -160,6 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return asyncio.run(_run_reference_command(args))
 
     if args.command == "market-data":
+        if args.market_data_command == "replay":
+            return asyncio.run(run_market_data_replay_command(args))
         return asyncio.run(run_market_data_shadow_command(args))
 
     raise RuntimeError(f"Unsupported command: {args.command}")

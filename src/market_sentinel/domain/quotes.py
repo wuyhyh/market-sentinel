@@ -43,6 +43,7 @@ class QuoteFreshness(StrEnum):
     OUTSIDE_CONTINUOUS_TRADING = "outside_continuous_trading"
     NOT_VERIFIED_CONTINUOUS_TRADING = "not_verified_continuous_trading"
     UNKNOWN_MARKET_STATE = "unknown_market_state"
+    REPLAY = "replay"
 
 
 class QualitySeverity(StrEnum):
