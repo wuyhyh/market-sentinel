@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -37,6 +38,7 @@ from market_sentinel.market_data.replay import (
     SnapshotReplayMarketDataProvider,
 )
 from market_sentinel.market_data.shadow import build_shadow_report
+from market_sentinel.reporting.markdown import ShadowReportMarkdownRenderer
 from market_sentinel.reporting.shadow import (
     ShadowReportService,
     build_shadow_report_summary,
@@ -51,6 +53,7 @@ REPLAYED_AT = datetime(2026, 7, 28, 1, 2, 3, tzinfo=UTC)
 PHASE = MarketPhase.A_SHARE_CLOSE
 CRITICAL_SYMBOLS = ("510300.SH", "588200.SH", "600183.SH")
 BASE_SYMBOLS = CRITICAL_SYMBOLS + ("000333.SZ",)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _security_type(symbol: str) -> SecurityCategory:
@@ -199,6 +202,118 @@ def _args(input_path: Path, config_path: Path) -> argparse.Namespace:
     return argparse.Namespace(input=input_path, config=config_path)
 
 
+def _format_args(
+    input_path: Path,
+    config_path: Path,
+    output_format: str,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        input=input_path,
+        config=config_path,
+        format=output_format,
+    )
+
+
+def _renderer_report() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "report_id": "shadow-replay-20260728T010203Z",
+        "status": "complete",
+        "data_mode": "replay",
+        "execution_mode": "shadow",
+        "input_snapshot_path": "data/market-data/snapshots/example.json",
+        "input_provider": "opend",
+        "original_requested_at": ORIGINAL_REQUESTED_AT.isoformat(),
+        "original_completed_at": ORIGINAL_COMPLETED_AT.isoformat(),
+        "replayed_at": REPLAYED_AT.isoformat(),
+        "generated_at": REPLAYED_AT.isoformat(),
+        "original_market_state": "closed",
+        "original_freshness_status": "outside_continuous_trading",
+        "source_time_range": {
+            "oldest": SOURCE_TIME.isoformat(),
+            "newest": SOURCE_TIME.isoformat(),
+        },
+        "received_at_range": {
+            "oldest": ORIGINAL_COMPLETED_AT.isoformat(),
+            "newest": ORIGINAL_COMPLETED_AT.isoformat(),
+        },
+        "completeness": "complete",
+        "deterministic_analysis": {
+            "requested_count": 4,
+            "valid_quote_count": 4,
+            "invalid_quote_count": 0,
+            "missing_count": 0,
+            "critical_missing_symbols": [],
+            "advancer_count": 1,
+            "decliner_count": 1,
+            "unchanged_count": 1,
+            "average_change_pct": "1.6667",
+            "median_change_pct": "0.0000",
+            "maximum_gain_symbol": "510300.SH",
+            "maximum_gain_change_pct": "10.0000",
+            "maximum_loss_symbol": "588200.SH",
+            "maximum_loss_change_pct": "-5.0000",
+            "turnover_total": "1000.25",
+            "stock_count": 2,
+            "etf_count": 2,
+            "critical_holdings": [
+                {
+                    "symbol": "510300.SH",
+                    "name": "沪深300ETF华泰柏瑞",
+                    "last_price": "11",
+                    "previous_close": "10",
+                    "change": "1",
+                    "change_pct": "10.0000",
+                    "trading_status": "closed",
+                    "source_time": SOURCE_TIME.isoformat(),
+                },
+                {
+                    "symbol": "588200.SH",
+                    "name": "科创芯片ETF嘉实",
+                    "last_price": "9.5",
+                    "previous_close": "10",
+                    "change": "-0.5",
+                    "change_pct": "-5.0000",
+                    "trading_status": "closed",
+                    "source_time": SOURCE_TIME.isoformat(),
+                },
+                {
+                    "symbol": "600183.SH",
+                    "name": "生益科技",
+                    "last_price": "10",
+                    "previous_close": "10",
+                    "change": "0",
+                    "change_pct": "0.0000",
+                    "trading_status": "closed",
+                    "source_time": SOURCE_TIME.isoformat(),
+                },
+            ],
+        },
+        "risk_result": {
+            "action": "no_action",
+            "status": "passed",
+            "warnings": [],
+            "portfolio_exposure_evaluated": False,
+            "reason": (
+                "position quantities, costs, and market values are not part "
+                "of the watchlist"
+            ),
+        },
+        "narrative": {
+            "summary": "该离线简报描述录制快照时的行情状态。",
+            "observations": ["快照质量门接受 4 条报价。"],
+            "limitations": ["未提供新闻或投资建议。"],
+        },
+        "warnings": [],
+        "critical_missing_symbols": [],
+        "provider_errors": [],
+        "llm_provider": "mock",
+        "llm_status": "completed",
+        "llm_error": None,
+        "network_calls": 0,
+    }
+
+
 def test_deterministic_statistics_cover_prices_counts_and_critical_holdings(
     tmp_path: Path,
 ) -> None:
@@ -288,7 +403,7 @@ async def test_full_93_symbol_report_is_offline_atomic_and_not_live(
 
     monkeypatch.setattr("socket.create_connection", reject_network)
     monkeypatch.setattr(
-        "market_sentinel.market_data.shadow.os.replace",
+        "market_sentinel.reporting.shadow.os.replace",
         track_replace,
     )
 
@@ -678,7 +793,7 @@ async def test_missing_watchlist_and_report_write_failure_are_nonzero(
         raise OSError("password=SecretValue123456789")
 
     monkeypatch.setattr(
-        "market_sentinel.market_data.shadow.os.replace",
+        "market_sentinel.reporting.shadow.os.replace",
         fail_replace,
     )
     output_exit = await run_shadow_report_command(
@@ -768,4 +883,314 @@ def test_shadow_summary_is_stable_and_never_expands_quote_rows(
         "llm_status",
         "network_calls",
         "output_path",
+        "json_output_path",
+        "markdown_output_path",
     ]
+
+
+def test_markdown_renderer_contains_complete_auditable_sections() -> None:
+    report = _renderer_report()
+
+    markdown = ShadowReportMarkdownRenderer().render(
+        report,
+        json_output_path=Path(
+            "data/reports/shadow/20260728T010203Z-replay-report.json"
+        ),
+    )
+
+    assert markdown.startswith("# MarketSentinel 市场简报\n")
+    assert "## 报告信息" in markdown
+    assert "完整（complete）" in markdown
+    assert "> 本报告基于历史快照回放" in markdown
+    assert "## 数据质量" in markdown
+    assert "- 请求证券数：4" in markdown
+    assert "- 有效报价数：4" in markdown
+    assert "## 市场概览" in markdown
+    assert "- 平均涨跌幅：1.6667%" in markdown
+    assert "- 中位数涨跌幅：0.0000%" in markdown
+    assert "510300.SH（10.0000%）" in markdown
+    assert "588200.SH（-5.0000%）" in markdown
+    assert "- 总成交额：1000.25" in markdown
+    assert "source_time 范围" in markdown
+    assert "received_at 范围" in markdown
+    assert "JSON 权威报告路径" in markdown
+
+
+def test_markdown_has_exact_three_critical_holdings_without_position_values() -> None:
+    markdown = ShadowReportMarkdownRenderer().render(
+        _renderer_report(),
+        json_output_path=Path("report.json"),
+    )
+
+    table_rows = [
+        line
+        for line in markdown.splitlines()
+        if line.startswith("| ") and not line.startswith("| ---")
+    ]
+    assert len(table_rows) == 4
+    assert sum("510300.SH" in line for line in table_rows) == 1
+    assert sum("588200.SH" in line for line in table_rows) == 1
+    assert sum("600183.SH" in line for line in table_rows) == 1
+    assert "portfolio_exposure_evaluated：false" in markdown
+    assert "本报告不能判断组合风险高低" in markdown
+    assert "建议继续持有" not in markdown
+    assert "买入" not in markdown
+    assert "卖出" not in markdown
+
+
+@pytest.mark.parametrize(
+    ("completeness", "expected_label"),
+    [
+        ("complete", "完整（complete）"),
+        ("partial", "部分可用（partial）"),
+        ("failed", "失败（failed）"),
+    ],
+)
+def test_markdown_uses_explicit_completeness_labels(
+    completeness: str,
+    expected_label: str,
+) -> None:
+    report = _renderer_report()
+    report["completeness"] = completeness
+    report["status"] = completeness
+
+    markdown = ShadowReportMarkdownRenderer().render(
+        report,
+        json_output_path=None,
+    )
+
+    assert expected_label in markdown
+    assert "本次未生成" in markdown
+
+
+def test_markdown_renders_empty_narrative_llm_failure_and_warnings() -> None:
+    report = _renderer_report()
+    report["narrative"] = None
+    report["llm_status"] = "failed"
+    report["critical_missing_symbols"] = ["588200.SH"]
+    report["warnings"] = [
+        {
+            "code": "MISSING_QUOTE",
+            "severity": "critical",
+            "message": "critical quote unavailable",
+            "symbol": "588200.SH",
+        }
+    ]
+    report["provider_errors"] = [
+        {
+            "category": "timeout",
+            "code": "timeout",
+            "message": "provider timeout",
+            "symbol": None,
+        }
+    ]
+
+    markdown = ShadowReportMarkdownRenderer().render(
+        report,
+        json_output_path=Path("report.json"),
+    )
+
+    assert "Mock LLM 未生成叙述（状态：failed）" in markdown
+    assert "MISSING_QUOTE" in markdown
+    assert "588200.SH" in markdown
+    assert "provider timeout" in markdown
+    assert "- LLM 状态：failed" in markdown
+
+
+def test_markdown_escapes_tables_headings_code_and_sensitive_text() -> None:
+    report = _renderer_report()
+    analysis = report["deterministic_analysis"]
+    assert isinstance(analysis, dict)
+    holdings = analysis["critical_holdings"]
+    assert isinstance(holdings, list)
+    holdings[0]["name"] = "名称|伪造\n# 标题 `代码`"
+    report["warnings"] = [
+        {
+            "code": "unsafe",
+            "severity": "high",
+            "message": (
+                "token=SecretValue123456789 "
+                "email=user@example.com password=anotherSecret123456"
+            ),
+            "symbol": "510300.SH",
+        }
+    ]
+
+    markdown = ShadowReportMarkdownRenderer().render(
+        report,
+        json_output_path=Path("report.json"),
+    )
+
+    assert "名称\\|伪造 \\# 标题 \\`代码\\`" in markdown
+    assert "\n# 标题" not in markdown
+    assert "SecretValue123456789" not in markdown
+    assert "anotherSecret123456" not in markdown
+    assert "user@example.com" not in markdown
+    assert "[redacted-secret]" in markdown
+    assert "[redacted-email]" in markdown
+
+
+@pytest.mark.parametrize(
+    ("output_format", "expect_json", "expect_markdown"),
+    [
+        ("json", True, False),
+        ("markdown", False, True),
+        ("both", True, True),
+    ],
+)
+async def test_cli_output_formats_and_json_default_compatibility(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    output_format: str,
+    expect_json: bool,
+    expect_markdown: bool,
+) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    config_path = tmp_path / "watchlist.yaml"
+    _write_json(
+        snapshot_path,
+        _snapshot_payload(tuple(_quote(symbol) for symbol in BASE_SYMBOLS)),
+    )
+    _write_watchlist(config_path, BASE_SYMBOLS)
+
+    exit_code = await run_shadow_report_command(
+        _format_args(snapshot_path, config_path, output_format),
+        output_dir=tmp_path / "data" / "reports" / "shadow",
+        now=lambda: REPLAYED_AT,
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert (summary["json_output_path"] is not None) is expect_json
+    assert (summary["markdown_output_path"] is not None) is expect_markdown
+    if expect_json:
+        json_path = Path(summary["json_output_path"])
+        assert json_path.exists()
+        json_report = json.loads(json_path.read_text(encoding="utf-8"))
+        assert json_report["schema_version"] == 1
+        assert summary["output_path"] == summary["json_output_path"]
+    if expect_markdown:
+        markdown_path = Path(summary["markdown_output_path"])
+        assert markdown_path.exists()
+        assert markdown_path.read_text(encoding="utf-8").startswith(
+            "# MarketSentinel 市场简报\n"
+        )
+        if not expect_json:
+            assert summary["output_path"] == summary["markdown_output_path"]
+
+
+async def test_both_outputs_share_report_id_and_are_atomically_replaced(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    config_path = tmp_path / "watchlist.yaml"
+    _write_json(
+        snapshot_path,
+        _snapshot_payload(tuple(_quote(symbol) for symbol in BASE_SYMBOLS)),
+    )
+    _write_watchlist(config_path, BASE_SYMBOLS)
+    replacements: list[tuple[Path, Path]] = []
+    real_replace = os.replace
+
+    def track_replace(source: Path, destination: Path) -> None:
+        replacements.append((Path(source), Path(destination)))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(
+        "market_sentinel.reporting.shadow.os.replace",
+        track_replace,
+    )
+
+    exit_code = await run_shadow_report_command(
+        _format_args(snapshot_path, config_path, "both"),
+        output_dir=tmp_path / "reports",
+        now=lambda: REPLAYED_AT,
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    json_path = Path(summary["json_output_path"])
+    markdown_path = Path(summary["markdown_output_path"])
+    report = json.loads(json_path.read_text(encoding="utf-8"))
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert json_path.stem == markdown_path.stem
+    assert report["report_id"] in markdown
+    assert len(replacements) == 2
+    assert all(source.suffix == ".tmp" for source, _ in replacements)
+    assert {destination.suffix for _, destination in replacements} == {".json", ".md"}
+
+
+async def test_markdown_uses_existing_report_without_recomputing_or_network(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot_path = tmp_path / "snapshot.json"
+    config_path = tmp_path / "watchlist.yaml"
+    _write_json(
+        snapshot_path,
+        _snapshot_payload(tuple(_quote(symbol) for symbol in BASE_SYMBOLS)),
+    )
+    _write_watchlist(config_path, BASE_SYMBOLS)
+    network_attempts = 0
+
+    def reject_network(*args: object, **kwargs: object) -> object:
+        nonlocal network_attempts
+        network_attempts += 1
+        raise AssertionError("network attempted")
+
+    monkeypatch.setattr("socket.create_connection", reject_network)
+
+    exit_code = await run_shadow_report_command(
+        _format_args(snapshot_path, config_path, "markdown"),
+        output_dir=tmp_path / "reports",
+        now=lambda: REPLAYED_AT,
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    markdown = Path(summary["markdown_output_path"]).read_text(encoding="utf-8")
+    assert exit_code == 0
+    assert summary["network_calls"] == 0
+    assert network_attempts == 0
+    assert "## 市场概览" in markdown
+    assert "## Facts" not in markdown
+    assert "510300.SH" in markdown
+
+
+def test_shadow_markdown_output_directory_is_git_ignored() -> None:
+    ignored = subprocess.run(
+        [
+            "git",
+            "check-ignore",
+            "--no-index",
+            "--quiet",
+            "data/reports/shadow/example-replay-report.md",
+        ],
+        cwd=PROJECT_ROOT,
+        check=False,
+    )
+
+    assert ignored.returncode == 0
+
+
+def test_cli_format_defaults_to_json() -> None:
+    from market_sentinel.cli import parse_args
+
+    default_args = parse_args(
+        ["report", "shadow", "--input", "snapshot.json"]
+    )
+    markdown_args = parse_args(
+        [
+            "report",
+            "shadow",
+            "--input",
+            "snapshot.json",
+            "--format",
+            "markdown",
+        ]
+    )
+
+    assert default_args.format == "json"
+    assert markdown_args.format == "markdown"

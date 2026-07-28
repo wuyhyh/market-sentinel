@@ -185,6 +185,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Override WATCHLIST_CONFIG_PATH for this command",
     )
+    shadow.add_argument(
+        "--format",
+        choices=("json", "markdown", "both"),
+        default="json",
+        help="Output JSON (default), Markdown, or both formats",
+    )
 
     return parser.parse_args(argv)
 

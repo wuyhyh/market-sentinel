@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import tempfile
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from typing import Literal
 
 from market_sentinel.domain.models import ActionState
 from market_sentinel.domain.quotes import MarketQuote, QuoteBatch, TradingStatus
@@ -26,10 +28,8 @@ from market_sentinel.market_data.replay import (
     SnapshotReadError,
     SnapshotReplayMarketDataProvider,
 )
-from market_sentinel.market_data.shadow import (
-    ShadowOutputError,
-    write_shadow_report_atomic,
-)
+from market_sentinel.market_data.shadow import ShadowOutputError
+from market_sentinel.reporting.markdown import ShadowReportMarkdownRenderer
 from market_sentinel.risk_engine import evaluate_shadow_market_data_risk
 from market_sentinel.watchlist import WatchlistConfigurationError, WatchlistLoader
 
@@ -38,6 +38,7 @@ SHADOW_REPORT_OUTPUT_DIR = Path("data/reports/shadow")
 _PERCENT_QUANTUM = Decimal("0.0001")
 
 Clock = Callable[[], datetime]
+ShadowOutputFormat = Literal["json", "markdown", "both"]
 
 
 class ShadowReportError(Exception):
@@ -48,7 +49,15 @@ class ShadowReportError(Exception):
 class ShadowReportRun:
     status: str
     report: dict[str, object]
-    output_path: Path
+    json_output_path: Path | None
+    markdown_output_path: Path | None = None
+
+    @property
+    def output_path(self) -> Path:
+        output_path = self.json_output_path or self.markdown_output_path
+        if output_path is None:
+            raise ShadowReportError("shadow report has no output path")
+        return output_path
 
 
 class ShadowReportService:
@@ -59,11 +68,13 @@ class ShadowReportService:
         *,
         provider: SnapshotReplayMarketDataProvider,
         narrator: ShadowNarrator | None = None,
+        markdown_renderer: ShadowReportMarkdownRenderer | None = None,
         output_dir: Path = SHADOW_REPORT_OUTPUT_DIR,
         now: Clock = lambda: datetime.now(UTC),
     ) -> None:
         self._provider = provider
         self._narrator = narrator or MockShadowNarrator()
+        self._markdown_renderer = markdown_renderer or ShadowReportMarkdownRenderer()
         self._output_dir = output_dir
         self._now = now
 
@@ -71,6 +82,8 @@ class ShadowReportService:
         self,
         snapshot: LoadedMarketSnapshot,
         watchlist: WatchlistConfig,
+        *,
+        output_format: ShadowOutputFormat = "json",
     ) -> ShadowReportRun:
         requested = tuple(
             security.symbol for security in watchlist.securities if security.enabled
@@ -109,6 +122,11 @@ class ShadowReportService:
 
         generated_at = _utc_now(self._now)
         status = _report_status(batch.completeness, llm_status)
+        report_id, json_output_path, markdown_output_path = _allocate_output_paths(
+            self._output_dir,
+            generated_at,
+            output_format,
+        )
         report = build_shadow_replay_report(
             snapshot=snapshot,
             batch=batch,
@@ -120,14 +138,26 @@ class ShadowReportService:
             llm_error=llm_error,
             status=status,
             generated_at=generated_at,
+            report_id=report_id,
         )
-        output_path = write_shadow_report_atomic(
-            self._output_dir,
-            "replay-report",
-            generated_at,
-            report,
+        markdown = (
+            self._markdown_renderer.render(
+                report,
+                json_output_path=json_output_path,
+            )
+            if markdown_output_path is not None
+            else None
         )
-        return ShadowReportRun(status=status, report=report, output_path=output_path)
+        if json_output_path is not None:
+            _write_json_atomic(json_output_path, report)
+        if markdown_output_path is not None and markdown is not None:
+            _write_text_atomic(markdown_output_path, markdown)
+        return ShadowReportRun(
+            status=status,
+            report=report,
+            json_output_path=json_output_path,
+            markdown_output_path=markdown_output_path,
+        )
 
 
 async def run_shadow_report_command(
@@ -162,15 +192,20 @@ async def run_shadow_report_command(
         )
         return 2
 
-    provider = SnapshotReplayMarketDataProvider(snapshot, now=now)
-    service = ShadowReportService(
-        provider=provider,
-        narrator=narrator,
-        output_dir=output_dir or SHADOW_REPORT_OUTPUT_DIR,
-        now=now,
-    )
     try:
-        run = await service.run(snapshot, watchlist)
+        output_format = _output_format(getattr(args, "format", "json"))
+        provider = SnapshotReplayMarketDataProvider(snapshot, now=now)
+        service = ShadowReportService(
+            provider=provider,
+            narrator=narrator,
+            output_dir=output_dir or SHADOW_REPORT_OUTPUT_DIR,
+            now=now,
+        )
+        run = await service.run(
+            snapshot,
+            watchlist,
+            output_format=output_format,
+        )
     except (OSError, ShadowOutputError):
         _print_json(
             _failure_summary(
@@ -261,10 +296,13 @@ def build_shadow_replay_report(
     llm_error: str | None,
     status: str,
     generated_at: datetime,
+    report_id: str,
 ) -> dict[str, object]:
+    source_times = tuple(quote.source_time for quote in batch.quotes)
+    received_times = tuple(quote.received_at for quote in batch.quotes)
     return {
         "schema_version": SHADOW_REPORT_SCHEMA_VERSION,
-        "report_id": f"shadow-replay-{generated_at.strftime('%Y%m%dT%H%M%SZ')}",
+        "report_id": report_id,
         "status": status,
         "data_mode": "replay",
         "execution_mode": "shadow",
@@ -276,6 +314,8 @@ def build_shadow_replay_report(
         "generated_at": generated_at.isoformat(),
         "original_market_state": snapshot.original_market_state.value,
         "original_freshness_status": snapshot.original_freshness.value,
+        "source_time_range": _datetime_range(source_times),
+        "received_at_range": _datetime_range(received_times),
         "completeness": batch.completeness.value,
         "facts": [_quote_fact(quote, snapshot.input_path) for quote in batch.quotes],
         "deterministic_analysis": dict(analysis),
@@ -335,6 +375,16 @@ def build_shadow_report_summary(
         "llm_status": run.report["llm_status"],
         "network_calls": 0,
         "output_path": run.output_path.as_posix(),
+        "json_output_path": (
+            run.json_output_path.as_posix()
+            if run.json_output_path is not None
+            else None
+        ),
+        "markdown_output_path": (
+            run.markdown_output_path.as_posix()
+            if run.markdown_output_path is not None
+            else None
+        ),
     }
 
 
@@ -554,6 +604,8 @@ def _failure_summary(
         "provider_error_counts": {category: error_count},
         "network_calls": 0,
         "output_path": None,
+        "json_output_path": None,
+        "markdown_output_path": None,
     }
 
 
@@ -582,6 +634,82 @@ def _percent_text(value: Decimal) -> str:
 
 def _decimal_or_none(value: Decimal | None) -> str | None:
     return _decimal_text(value) if value is not None else None
+
+
+def _datetime_range(values: Sequence[datetime]) -> dict[str, str | None]:
+    if not values:
+        return {"oldest": None, "newest": None}
+    return {
+        "oldest": min(values).isoformat(),
+        "newest": max(values).isoformat(),
+    }
+
+
+def _output_format(value: object) -> ShadowOutputFormat:
+    if value not in {"json", "markdown", "both"}:
+        raise ShadowReportError("unsupported shadow report output format")
+    return value
+
+
+def _allocate_output_paths(
+    output_dir: Path,
+    generated_at: datetime,
+    output_format: ShadowOutputFormat,
+) -> tuple[str, Path | None, Path | None]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = generated_at.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    sequence = 0
+    while True:
+        suffix = "" if sequence == 0 else f"-{sequence:02d}"
+        stem = f"{timestamp}{suffix}-replay-report"
+        json_candidate = output_dir / f"{stem}.json"
+        markdown_candidate = output_dir / f"{stem}.md"
+        if not json_candidate.exists() and not markdown_candidate.exists():
+            break
+        sequence += 1
+    report_id = f"shadow-replay-{timestamp}{suffix}"
+    return (
+        report_id,
+        json_candidate if output_format in {"json", "both"} else None,
+        markdown_candidate if output_format in {"markdown", "both"} else None,
+    )
+
+
+def _write_json_atomic(path: Path, report: Mapping[str, object]) -> None:
+    serialized = json.dumps(
+        report,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    json.loads(serialized)
+    _write_text_atomic(path, serialized)
+
+
+def _write_text_atomic(path: Path, contents: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = contents if contents.endswith("\n") else contents + "\n"
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary.write(normalized)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+    except OSError as error:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise ShadowOutputError(
+            f"unable to write shadow report at {path.as_posix()}"
+        ) from error
 
 
 def _utc_now(clock: Clock) -> datetime:
