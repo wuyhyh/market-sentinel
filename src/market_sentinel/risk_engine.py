@@ -1,11 +1,14 @@
 from datetime import UTC, datetime
 
 from market_sentinel.domain.models import (
+    ActionState,
     Position,
     RiskPolicy,
     RiskReport,
     RiskViolation,
 )
+from market_sentinel.domain.quotes import QuoteBatch
+from market_sentinel.domain.security_data import DataCompleteness
 
 
 def evaluate_portfolio(policy: RiskPolicy, positions: list[Position]) -> RiskReport:
@@ -73,3 +76,48 @@ def evaluate_portfolio(policy: RiskPolicy, positions: list[Position]) -> RiskRep
             "stock_ratio": total_stock_value / policy.total_capital,
         },
     )
+
+
+def evaluate_shadow_market_data_risk(batch: QuoteBatch) -> dict[str, object]:
+    """Evaluate replay data safety without inventing portfolio exposures."""
+    warnings: list[dict[str, str | None]] = []
+    if batch.completeness is DataCompleteness.FAILED:
+        warnings.append(
+            {
+                "code": "MARKET_DATA_FAILED",
+                "severity": "critical",
+                "message": "The replay contains no usable market quotes.",
+                "symbol": None,
+            }
+        )
+    elif batch.completeness is DataCompleteness.PARTIAL:
+        warnings.append(
+            {
+                "code": "MARKET_DATA_PARTIAL",
+                "severity": "high",
+                "message": "The replay contains an explicitly partial quote batch.",
+                "symbol": None,
+            }
+        )
+    warnings.extend(
+        {
+            "code": "CRITICAL_QUOTE_MISSING",
+            "severity": "critical",
+            "message": "A critical holding quote is unavailable in the replay.",
+            "symbol": symbol,
+        }
+        for symbol in batch.critical_missing_symbols
+    )
+    return {
+        "action": ActionState.NO_ACTION.value,
+        "status": (
+            "failed"
+            if batch.completeness is DataCompleteness.FAILED
+            else "warning"
+            if warnings
+            else "passed"
+        ),
+        "warnings": warnings,
+        "portfolio_exposure_evaluated": False,
+        "reason": "position quantities, costs, and market values are not part of the watchlist",
+    }

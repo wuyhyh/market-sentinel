@@ -35,6 +35,7 @@ from market_sentinel.market_data import (
 )
 from market_sentinel.market_data.replay import run_market_data_replay_command
 from market_sentinel.market_data.shadow import run_market_data_shadow_command
+from market_sentinel.reporting.shadow import run_shadow_report_command
 from market_sentinel.watchlist import WatchlistConfigurationError, WatchlistLoader
 
 REFERENCE_OUTPUT_DIR = Path("data/reference/tushare")
@@ -161,6 +162,30 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Atomically write a full replay report under data/market-data/replays",
     )
 
+    report = subparsers.add_parser(
+        "report",
+        help="Generate an offline report from a validated replay snapshot",
+    )
+    report_commands = report.add_subparsers(
+        dest="report_command",
+        required=True,
+    )
+    shadow = report_commands.add_parser(
+        "shadow",
+        help="Generate a replay-only shadow report with the Mock LLM",
+    )
+    shadow.add_argument(
+        "--input",
+        required=True,
+        type=Path,
+        help="Shadow snapshot JSON file to report on",
+    )
+    shadow.add_argument(
+        "--config",
+        type=Path,
+        help="Override WATCHLIST_CONFIG_PATH for this command",
+    )
+
     return parser.parse_args(argv)
 
 
@@ -184,6 +209,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.market_data_command == "replay":
             return asyncio.run(run_market_data_replay_command(args))
         return asyncio.run(run_market_data_shadow_command(args))
+
+    if args.command == "report":
+        return asyncio.run(run_shadow_report_command(args))
 
     raise RuntimeError(f"Unsupported command: {args.command}")
 
